@@ -49,7 +49,7 @@ También puedes publicar la carpeta en GitHub Pages u otro hosting estático.
 ## Estructura del proyecto
 
 ```
-ROLEX-OCHENTERO/
+MDR-MacroData-Rhythm/
 ├── index.html                      # UI principal, splash y modales
 ├── css/
 │   └── rolodex.css                 # Estilos (rueda, tabla, overlays)
