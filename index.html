@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MDR — MacroData Rhythm</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=Barlow+Condensed:wght@500;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/rolodex.css" />
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/sql-wasm.js" defer></script>
+  <script src="js/sqlite-store.js" defer></script>
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+  <div class="splash" id="splash" role="status" aria-live="polite" aria-label="Cargando MDR">
+    <div class="splash__inner">
+      <img class="splash__logo" src="img/logo.png" alt="MDR" width="320" height="320" />
+      <div class="splash__track" aria-hidden="true">
+        <div class="splash__bar" id="splashBar"></div>
+      </div>
+      <p class="splash__pct" id="splashPct">0%</p>
+      <p class="splash__label">SYSTEM BOOT // MDR</p>
+    </div>
+  </div>
+
+  <div class="desk" id="desk">
+    <header class="masthead">
+      <button
+        type="button"
+        class="menu-toggle"
+        id="menuToggle"
+        aria-controls="importTray"
+        aria-expanded="false"
+        aria-label="Abrir menú de importación"
+      >
+        <span class="menu-toggle__bars" aria-hidden="true"></span>
+      </button>
+      <div class="masthead__titles">
+        <p class="brand">MDR</p>
+        <p class="tagline">MacroData Rhythm // SYS_v2.026</p>
+      </div>
+
+      <div class="sys-status" title="Sistema en línea">
+        <span class="sys-status__led" aria-hidden="true"></span>
+        <span class="sys-status__text">ONLINE</span>
+      </div>
+    </header>
+
+    <div class="workspace" id="workspace">
+      <div class="import-scrim" id="importScrim" hidden></div>
+
+      <aside
+        class="import-tray"
+        id="importTray"
+        aria-labelledby="importTrayTitle"
+        aria-hidden="true"
+      >
+        <div class="menu-search">
+          <label class="menu-search__label" for="searchInput">Buscar ficha</label>
+          <div class="search-wrap">
+            <input
+              type="search"
+              id="searchInput"
+              placeholder="Alumno, instrumento o curso…"
+              autocomplete="off"
+              aria-label="Buscar ficha"
+              aria-controls="searchResults"
+              aria-expanded="false"
+            />
+            <ul id="searchResults" class="search-results" role="listbox" hidden></ul>
+          </div>
+          <button type="button" class="btn btn--solid new-ficha-btn" id="newFichaBtn">
+            + Nueva ficha
+          </button>
+          <p class="hint" id="statusHint">Gira con la rueda · clic para abrir</p>
+        </div>
+
+        <div class="import-tray__head">
+          <h2 id="importTrayTitle">Base de datos</h2>
+          <p class="import-tray__formats">
+            <span>SQLite (.db)</span>
+            <span>Excel (.xlsx / .xls)</span>
+            <span>CSV</span>
+            <span>Access → Excel / CSV</span>
+          </p>
+        </div>
+
+        <label class="dropzone" id="dropzone" for="excelInput">
+          <input type="file" id="excelInput" accept=".db,.sqlite,.sqlite3,.csv,.xlsx,.xls" hidden />
+          <span class="dropzone__title">Arrastra el archivo o haz clic</span>
+          <span class="dropzone__hint">.db SQLite · Excel · CSV · Access exportado</span>
+        </label>
+
+        <button type="button" class="btn btn--solid export-db-btn" id="exportDbBtn">
+          Exportar SQLite (.db)
+        </button>
+      </aside>
+
+      <main class="stage" id="stage" tabindex="0" aria-label="Tarjetero MDR">
+        <div class="housing" aria-hidden="true">
+          <div class="housing-rim housing-rim--top"></div>
+          <div class="housing-body"></div>
+          <div class="housing-rim housing-rim--bottom"></div>
+          <div class="axle"></div>
+        </div>
+
+        <div class="rolodex" id="rolodex"></div>
+
+        <div class="stage-tools">
+          <button
+            type="button"
+            class="wheel-sort"
+            id="wheelSort"
+            data-dir="1"
+            title="Orden alfabético A → Z (clic para invertir)"
+            aria-label="Ordenar rueda por nombre. Ahora A → Z"
+          >
+            A → Z
+          </button>
+          <div class="counter" id="counter" aria-live="polite"></div>
+        </div>
+      </main>
+
+      <section class="table-view" id="tableView" hidden aria-label="Vista de tablas por curso">
+        <div class="table-view__scroll" id="tableViewContent"></div>
+      </section>
+    </div>
+
+    <footer class="foot">
+      <span>SQLite · Excel · CSV</span>
+      <span class="sep">·</span>
+      <span>Flechas ↑↓ navegan · Enter abre ficha</span>
+    </footer>
+  </div>
+
+  <button
+    type="button"
+    class="view-toggle"
+    id="viewToggle"
+    aria-pressed="false"
+    aria-label="Cambiar a vista tabla"
+    title="Cambiar a vista tabla"
+  >
+    <span class="view-toggle__text">TABLA</span>
+  </button>
+
+  <button
+    type="button"
+    class="mute-toggle"
+    id="muteToggle"
+    aria-pressed="false"
+    aria-label="Silenciar sonidos"
+    title="Silenciar sonidos"
+  >
+    <span class="mute-toggle__text">SONIDO</span>
+  </button>
+
+  <!-- Mapeo de columnas -->
+  <div class="overlay" id="importOverlay" hidden>
+    <div class="panel panel--import" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+      <header class="panel-head">
+        <h2 id="importTitle">Configurar columnas</h2>
+        <p class="panel-sub" id="importSubtitle">Asigna cada columna del archivo a un campo de la ficha</p>
+      </header>
+
+      <div class="import-preview" id="importPreview"></div>
+
+      <div class="map-table-wrap">
+        <table class="map-table" id="mapTable">
+          <thead>
+            <tr>
+              <th>Columna del archivo</th>
+              <th>Campo de la ficha</th>
+              <th>Ejemplo</th>
+            </tr>
+          </thead>
+          <tbody id="mapBody"></tbody>
+        </table>
+      </div>
+
+      <footer class="panel-actions">
+        <button type="button" class="btn btn--ghost" id="importCancel">Cancelar</button>
+        <button type="button" class="btn btn--solid" id="importConfirm">Importar fichas</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Modo de importación -->
+  <div class="overlay" id="importModeOverlay" hidden>
+    <div class="panel panel--mode" role="dialog" aria-modal="true" aria-labelledby="importModeTitle">
+      <header class="panel-head">
+        <h2 id="importModeTitle">¿Cómo importar?</h2>
+        <p class="panel-sub" id="importModeSubtitle">Elige si sustituyes la base actual o añades las fichas nuevas</p>
+      </header>
+      <div class="mode-actions">
+        <button type="button" class="btn btn--solid" id="importModeReplace">Sobrescribir base actual</button>
+        <button type="button" class="btn btn--ghost" id="importModeAppend">Añadir a la base actual</button>
+        <button type="button" class="btn btn--ghost" id="importModeCancel">Cancelar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ficha abierta -->
+  <div class="overlay" id="sheetOverlay" hidden>
+    <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheetDialogTitle">
+      <div class="sheet-toolbar">
+        <span class="sheet-num" id="sheetNum"></span>
+        <div class="sheet-actions">
+          <button type="button" class="btn btn--ghost" id="sheetEdit" hidden>Editar</button>
+          <button type="button" class="btn btn--ghost" id="sheetCancelEdit" hidden>Descartar</button>
+          <button type="button" class="btn btn--solid" id="sheetSave" hidden>Guardar</button>
+          <button type="button" class="btn btn--danger" id="sheetDelete" hidden>Eliminar</button>
+          <button type="button" class="btn btn--ghost" id="sheetClose" aria-label="Cerrar">Cerrar</button>
+        </div>
+      </div>
+
+      <div id="sheetView" class="sheet-view"></div>
+
+      <form id="sheetForm" class="sheet-form" hidden>
+        <label>
+          <span>Nombre</span>
+          <input name="nombre" type="text" autocomplete="off" required />
+        </label>
+        <label>
+          <span>Instrumento</span>
+          <input name="instrumento" type="text" autocomplete="off" />
+        </label>
+        <label>
+          <span>Curso</span>
+          <input name="curso" type="text" autocomplete="off" />
+        </label>
+        <label class="full">
+          <span>Dirección</span>
+          <input name="direccion" type="text" autocomplete="street-address" />
+        </label>
+        <label>
+          <span>Teléfono</span>
+          <input
+            name="telefono"
+            type="tel"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            autocomplete="tel"
+            maxlength="15"
+          />
+        </label>
+        <label>
+          <span>Email</span>
+          <input name="email" type="email" autocomplete="off" />
+        </label>
+        <label class="full">
+          <span>Notas</span>
+          <textarea name="notas" rows="3"></textarea>
+        </label>
+        <div id="sheetExtraFields" class="extra-fields full"></div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var splash = document.getElementById("splash");
+      var bar = document.getElementById("splashBar");
+      var pct = document.getElementById("splashPct");
+      if (!splash || !bar || !pct) return;
+
+      var DURATION = 2000;
+      var start = performance.now();
+
+      function frame(now) {
+        var p = Math.min(1, (now - start) / DURATION);
+        var value = Math.round(p * 100);
+        bar.style.width = value + "%";
+        pct.textContent = value + "%";
+
+        if (p < 1) {
+          requestAnimationFrame(frame);
+          return;
+        }
+
+        document.body.classList.add("splash-done");
+        splash.classList.add("is-done");
+        window.setTimeout(function () {
+          if (splash && splash.parentNode) splash.parentNode.removeChild(splash);
+        }, 450);
+      }
+
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
