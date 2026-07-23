@@ -103,4 +103,4 @@ En el menú hamburguesa: arrastra el archivo o selecciónalo. Si ya hay datos, p
 
 ## Licencia
 
-Uso libre para el proyecto escolar / personal. 
+Bajo GPL-3.0 license. Uso libre para el proyecto escolar / personal. 
