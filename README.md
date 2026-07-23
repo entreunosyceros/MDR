@@ -1,5 +1,7 @@
 # MDR — MacroData Rhythm
-
+<p align="center">
+<img width="1024" height="559" alt="logo" src="https://github.com/user-attachments/assets/2697f2c3-6b06-482d-932e-2f32005d374d" />
+</p>
 Fichero digital estilo **Rolodex** para gestionar alumnos de una escuela de música. Interfaz retro con acentos cyberpunk: rueda 3D de fichas, vista por cursos, importación/exportación y persistencia local con SQLite en el navegador.
 
 ## Características
