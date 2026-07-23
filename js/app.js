@@ -1,7 +1,20 @@
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * app.js — Lógica principal del Rolodex Musical (MDR)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Controla la rueda 3D de fichas de alumnos, la vista tabla agrupada por
+ * curso, búsqueda, importación/exportación de datos (Excel, CSV, SQLite),
+ * edición de fichas individuales y persistencia vía window.MdrStore.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 (() => {
   "use strict";
 
-  const DEFAULT_ALUMNOS = [
+  // ══════════════════════════════════════════════════════════════════════════
+  // DATOS POR DEFECTO
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const ALUMNOS_POR_DEFECTO = [
     { nombre: "Carlos Gutiérrez", instrumento: "Guitarra clásica", curso: "3º Grado", direccion: "Calle Luna 8, Madrid", telefono: "600 112 233" },
     { nombre: "Lucía Fernández", instrumento: "Violín", curso: "1º Grado", direccion: "Av. del Prado 22, Madrid", telefono: "611 445 566" },
     { nombre: "Marcos Rodríguez", instrumento: "Piano", curso: "4º Grado", direccion: "Plaza Nueva 5, Sevilla", telefono: "622 778 899" },
@@ -16,7 +29,11 @@
     { nombre: "Clara Méndez", instrumento: "Arpa", curso: "1º Grado", direccion: "Plaza de la Música 1, Toledo", telefono: "620 151 617" },
   ];
 
-  const CANONICAL_FIELDS = [
+  // ══════════════════════════════════════════════════════════════════════════
+  // CONSTANTES DE CONFIGURACIÓN
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const CAMPOS_CANONICOS = [
     { id: "nombre", label: "Nombre" },
     { id: "instrumento", label: "Instrumento" },
     { id: "curso", label: "Curso" },
@@ -26,7 +43,8 @@
     { id: "notas", label: "Notas" },
   ];
 
-  const FIELD_ALIASES = {
+  /** Aliases para detectar columnas de Excel/CSV en inglés y español */
+  const ALIAS_CAMPOS = {
     nombre: ["nombre", "name", "alumno", "estudiante", "alumno/a", "apellidos y nombre", "nombre completo"],
     instrumento: ["instrumento", "instrument", "especialidad", "asignatura"],
     curso: ["curso", "nivel", "grado", "clase", "grupo"],
@@ -36,76 +54,89 @@
     notas: ["notas", "observaciones", "obs", "comentarios"],
   };
 
-  const CORE_KEYS = new Set(CANONICAL_FIELDS.map((f) => f.id));
-  const RADIUS = 300;
-  const VISIBLE_SPAN = 6;
-  /** Fixed angle between adjacent cards — keeps size stable regardless of count */
-  const CARD_ANGLE = 34;
-  const LEGACY_STORAGE_KEY = "mdr-alumnos-v1";
+  const CLAVES_NUCLEO = new Set(CAMPOS_CANONICOS.map((f) => f.id));
+  const RADIO = 300;
+  const RANGO_VISIBLE = 6;
+  /** Ángulo fijo entre fichas adyacentes — mantiene tamaño estable sin importar la cantidad */
+  const ANGULO_FICHA = 34;
+  const CLAVE_ALMACEN_LEGACY = "mdr-alumnos-v1";
 
-  const els = {
+  // ══════════════════════════════════════════════════════════════════════════
+  // REFERENCIAS AL DOM
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const dom = {
     rolodex: document.getElementById("rolodex"),
-    stage: document.getElementById("stage"),
-    searchInput: document.getElementById("searchInput"),
-    searchResults: document.getElementById("searchResults"),
-    excelInput: document.getElementById("excelInput"),
-    counter: document.getElementById("counter"),
-    statusHint: document.getElementById("statusHint"),
-    importOverlay: document.getElementById("importOverlay"),
-    importSubtitle: document.getElementById("importSubtitle"),
-    importPreview: document.getElementById("importPreview"),
-    mapBody: document.getElementById("mapBody"),
-    importCancel: document.getElementById("importCancel"),
-    importConfirm: document.getElementById("importConfirm"),
-    importModeOverlay: document.getElementById("importModeOverlay"),
-    importModeSubtitle: document.getElementById("importModeSubtitle"),
-    importModeReplace: document.getElementById("importModeReplace"),
-    importModeAppend: document.getElementById("importModeAppend"),
-    importModeCancel: document.getElementById("importModeCancel"),
-    sheetOverlay: document.getElementById("sheetOverlay"),
-    sheetNum: document.getElementById("sheetNum"),
-    sheetView: document.getElementById("sheetView"),
-    sheetForm: document.getElementById("sheetForm"),
-    sheetEdit: document.getElementById("sheetEdit"),
-    sheetCancelEdit: document.getElementById("sheetCancelEdit"),
-    sheetSave: document.getElementById("sheetSave"),
-    sheetDelete: document.getElementById("sheetDelete"),
-    sheetClose: document.getElementById("sheetClose"),
-    sheetExtraFields: document.getElementById("sheetExtraFields"),
-    menuToggle: document.getElementById("menuToggle"),
-    importTray: document.getElementById("importTray"),
-    importScrim: document.getElementById("importScrim"),
-    exportDbBtn: document.getElementById("exportDbBtn"),
-    newFichaBtn: document.getElementById("newFichaBtn"),
-    muteToggle: document.getElementById("muteToggle"),
-    viewToggle: document.getElementById("viewToggle"),
-    tableView: document.getElementById("tableView"),
-    tableViewContent: document.getElementById("tableViewContent"),
-    desk: document.getElementById("desk"),
-    wheelSort: document.getElementById("wheelSort"),
+    escenario: document.getElementById("stage"),
+    entradaBusqueda: document.getElementById("searchInput"),
+    resultadosBusqueda: document.getElementById("searchResults"),
+    entradaExcel: document.getElementById("excelInput"),
+    contador: document.getElementById("counter"),
+    indicadorEstado: document.getElementById("statusHint"),
+    overlayImportacion: document.getElementById("importOverlay"),
+    subtituloImportacion: document.getElementById("importSubtitle"),
+    previsualizacion: document.getElementById("importPreview"),
+    cuerpoMapa: document.getElementById("mapBody"),
+    btnCancelarImport: document.getElementById("importCancel"),
+    btnConfirmarImport: document.getElementById("importConfirm"),
+    overlayModo: document.getElementById("importModeOverlay"),
+    subtituloModo: document.getElementById("importModeSubtitle"),
+    btnReemplazar: document.getElementById("importModeReplace"),
+    btnAnadir: document.getElementById("importModeAppend"),
+    btnCancelarModo: document.getElementById("importModeCancel"),
+    overlayFicha: document.getElementById("sheetOverlay"),
+    numFicha: document.getElementById("sheetNum"),
+    vistaFicha: document.getElementById("sheetView"),
+    formularioFicha: document.getElementById("sheetForm"),
+    btnEditar: document.getElementById("sheetEdit"),
+    btnCancelarEdicion: document.getElementById("sheetCancelEdit"),
+    btnGuardar: document.getElementById("sheetSave"),
+    btnEliminar: document.getElementById("sheetDelete"),
+    btnCerrar: document.getElementById("sheetClose"),
+    camposExtra: document.getElementById("sheetExtraFields"),
+    botonMenu: document.getElementById("menuToggle"),
+    bandejaImport: document.getElementById("importTray"),
+    fondoImport: document.getElementById("importScrim"),
+    btnExportarDb: document.getElementById("exportDbBtn"),
+    btnNuevaFicha: document.getElementById("newFichaBtn"),
+    botonSilencio: document.getElementById("muteToggle"),
+    botonVista: document.getElementById("viewToggle"),
+    vistaTabla: document.getElementById("tableView"),
+    contenidoTabla: document.getElementById("tableViewContent"),
+    escritorio: document.getElementById("desk"),
+    botonOrdenRueda: document.getElementById("wheelSort"),
   };
 
-  let alumnos = DEFAULT_ALUMNOS.map((a) => ({ ...a }));
-  /** Unbounded wheel position — avoids reverse jump at the seam */
-  let spinIndex = 0;
-  let wheelLock = false;
-  let audioCtx = null;
-  let soundMuted = localStorage.getItem("mdr-sound-muted") === "1";
-  /** @type {"wheel" | "table"} */
-  let viewMode = "wheel";
-  /** 1 = A→Z, -1 = Z→A for the wheel order */
-  let wheelSortDir = 1;
-  let wheelSortApplied = false;
-  let pendingImport = null;
-  let sheetEditing = false;
-  /** True while composing a new card that is not yet in `alumnos` */
-  let isDraftNew = false;
-  let storeReady = false;
-  let importModeResolver = null;
+  // ══════════════════════════════════════════════════════════════════════════
+  // ESTADO DE LA APLICACIÓN
+  // ══════════════════════════════════════════════════════════════════════════
 
-  function readLegacyLocalStorage() {
+  let alumnos = ALUMNOS_POR_DEFECTO.map((a) => ({ ...a }));
+  /** Posición ilimitada de la rueda — evita saltos inversos en el borde */
+  let indiceGiro = 0;
+  let bloqueoRueda = false;
+  let contextoAudio = null;
+  let sonidoSilenciado = localStorage.getItem("mdr-sound-muted") === "1";
+  /** @type {"rueda" | "tabla"} */
+  let modoVista = "rueda";
+  /** 1 = A→Z, -1 = Z→A para el orden de la rueda */
+  let ordenRueda = 1;
+  let ordenRuedaAplicado = false;
+  let importacionPendiente = null;
+  let editandoFicha = false;
+  /** True mientras se compone una ficha nueva no guardada en `alumnos` */
+  let esBorradorNuevo = false;
+  let almacenListo = false;
+  let resolverModoImportacion = null;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PERSISTENCIA Y ALMACENAMIENTO
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Lee datos heredados del antiguo localStorage (migración) */
+  function leerAlmacenamientoLegado() {
     try {
-      const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+      const raw = localStorage.getItem(CLAVE_ALMACEN_LEGACY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed) || !parsed.length) return null;
@@ -125,27 +156,29 @@
     }
   }
 
-  async function persistAlumnos() {
-    if (!storeReady || !window.MdrStore) return false;
+  /** Guarda el array de alumnos en SQLite vía MdrStore */
+  async function persistirAlumnos() {
+    if (!almacenListo || !window.MdrStore) return false;
     try {
-      window.MdrStore.rebuildFromAlumnos(alumnos);
-      await window.MdrStore.persist();
+      window.MdrStore.reconstruirDesdeAlumnos(alumnos);
+      await window.MdrStore.persistir();
       return true;
     } catch (err) {
       console.warn("MDR: no se pudo guardar SQLite", err);
-      setStatus("No se pudo guardar la base SQLite");
+      establecerEstado("No se pudo guardar la base SQLite");
       return false;
     }
   }
 
-  function downloadDbFile() {
-    if (!storeReady || !window.MdrStore) {
-      setStatus("SQLite aún no está listo");
+  /** Descarga la base SQLite como archivo .db */
+  function descargarArchivoDb() {
+    if (!almacenListo || !window.MdrStore) {
+      establecerEstado("SQLite aún no está listo");
       return;
     }
     try {
-      window.MdrStore.rebuildFromAlumnos(alumnos);
-      const bytes = window.MdrStore.exportBytes();
+      window.MdrStore.reconstruirDesdeAlumnos(alumnos);
+      const bytes = window.MdrStore.exportarBytes();
       const blob = new Blob([bytes], { type: "application/x-sqlite3" });
       const stamp = new Date().toISOString().slice(0, 10);
       const url = URL.createObjectURL(blob);
@@ -156,15 +189,20 @@
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setStatus("Base SQLite exportada (.db)");
-      playClick();
+      establecerEstado("Base SQLite exportada (.db)");
+      reproducirClic();
     } catch (err) {
       console.error(err);
-      setStatus("Error al exportar .db");
+      establecerEstado("Error al exportar .db");
     }
   }
 
-  function normalizeKey(key) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // UTILIDADES DE TEXTO
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Normaliza una cadena para comparación: minúsculas, sin acentos */
+  function normalizarClave(key) {
     return String(key || "")
       .trim()
       .toLowerCase()
@@ -172,7 +210,8 @@
       .replace(/[\u0300-\u036f]/g, "");
   }
 
-  function escapeHtml(str) {
+  /** Escapa HTML para evitar inyecciones XSS */
+  function escaparHtml(str) {
     return String(str)
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
@@ -180,127 +219,155 @@
       .replace(/"/g, "&quot;");
   }
 
-  function digitsOnly(str) {
+  /** Extrae solo dígitos de una cadena (para teléfonos) */
+  function soloDigitos(str) {
     return String(str || "").replace(/\D/g, "");
   }
 
-  function guessField(header) {
-    const n = normalizeKey(header);
-    for (const [canonical, aliases] of Object.entries(FIELD_ALIASES)) {
-      if (aliases.some((a) => normalizeKey(a) === n) || n.includes(normalizeKey(canonical))) {
+  /** Intenta adivinar a qué campo canónico corresponde una cabecera */
+  function adivinarCampo(header) {
+    const n = normalizarClave(header);
+    for (const [canonical, aliases] of Object.entries(ALIAS_CAMPOS)) {
+      if (aliases.some((a) => normalizarClave(a) === n) || n.includes(normalizarClave(canonical))) {
         return canonical;
       }
     }
     return "";
   }
 
-  function activeIndex() {
+  // ══════════════════════════════════════════════════════════════════════════
+  // GEOMETRÍA DE LA RUEDA 3D
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Devuelve el índice real (circular) del alumno activo */
+  function indiceActivo() {
     const n = alumnos.length;
     if (!n) return 0;
-    return ((spinIndex % n) + n) % n;
+    return ((indiceGiro % n) + n) % n;
   }
 
   /**
-   * Unbounded wheel slot for a data index, nearest to current spinIndex.
-   * Keeps wrap continuous while using a fixed CARD_ANGLE (independent of n).
+   * Ranura absoluta para un índice de datos, más cercana al indiceGiro actual.
+   * Mantiene la continuidad del giro usando ANGULO_FICHA independiente de n.
    */
-  function absoluteSlot(index) {
+  function ranuraAbsoluta(index) {
     const n = alumnos.length;
     if (!n) return 0;
-    const k = Math.round((spinIndex - index) / n);
+    const k = Math.round((indiceGiro - index) / n);
     return index + k * n;
   }
 
-  function cardTransform(index) {
-    return `rotateX(${-absoluteSlot(index) * CARD_ANGLE}deg) translateZ(${RADIUS}px)`;
+  /** Calcula el CSS transform de una ficha en la rueda */
+  function transformacionFicha(index) {
+    return `rotateX(${-ranuraAbsoluta(index) * ANGULO_FICHA}deg) translateZ(${RADIO}px)`;
   }
 
-  function setStatus(text) {
-    els.statusHint.textContent = text;
+  // ══════════════════════════════════════════════════════════════════════════
+  // INDICADORES DE ESTADO
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function establecerEstado(text) {
+    dom.indicadorEstado.textContent = text;
   }
 
-  function updateCounter() {
+  function actualizarContador() {
     const n = alumnos.length;
-    const i = activeIndex();
-    els.counter.textContent = n ? `${i + 1} / ${n}` : "Sin fichas";
+    const i = indiceActivo();
+    dom.contador.textContent = n ? `${i + 1} / ${n}` : "Sin fichas";
   }
 
-  function isImportMenuOpen() {
-    return els.importTray.classList.contains("is-open");
+  // ══════════════════════════════════════════════════════════════════════════
+  // MENÚ DE IMPORTACIÓN (bandeja lateral)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function menuImportacionAbierto() {
+    return dom.bandejaImport.classList.contains("is-open");
   }
 
-  function setImportMenuOpen(open) {
-    els.importTray.classList.toggle("is-open", open);
-    els.importTray.setAttribute("aria-hidden", open ? "false" : "true");
-    els.importTray.inert = !open;
-    els.menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
-    els.menuToggle.setAttribute(
+  function establecerMenuImportacion(open) {
+    dom.bandejaImport.classList.toggle("is-open", open);
+    dom.bandejaImport.setAttribute("aria-hidden", open ? "false" : "true");
+    dom.bandejaImport.inert = !open;
+    dom.botonMenu.setAttribute("aria-expanded", open ? "true" : "false");
+    dom.botonMenu.setAttribute(
       "aria-label",
       open ? "Cerrar menú de importación" : "Abrir menú de importación"
     );
-    els.importScrim.hidden = !open;
+    dom.fondoImport.hidden = !open;
     if (open) {
-      window.setTimeout(() => els.searchInput.focus(), 280);
+      window.setTimeout(() => dom.entradaBusqueda.focus(), 280);
     }
   }
 
-  function toggleImportMenu() {
-    setImportMenuOpen(!isImportMenuOpen());
+  function alternarMenuImportacion() {
+    establecerMenuImportacion(!menuImportacionAbierto());
   }
 
-  function isModalOpen() {
+  // ══════════════════════════════════════════════════════════════════════════
+  // CONTROL DE MODALES
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function modalAbierto() {
     return (
-      !els.importOverlay.hidden ||
-      !els.sheetOverlay.hidden ||
-      !els.importModeOverlay.hidden
+      !dom.overlayImportacion.hidden ||
+      !dom.overlayFicha.hidden ||
+      !dom.overlayModo.hidden
     );
   }
 
-  function setModalOpen(open) {
+  function establecerModal(open) {
     document.body.classList.toggle("is-modal-open", open);
   }
 
-  function syncMuteUi() {
-    if (!els.muteToggle) return;
-    els.muteToggle.setAttribute("aria-pressed", soundMuted ? "true" : "false");
-    els.muteToggle.setAttribute("aria-label", soundMuted ? "Activar sonidos" : "Silenciar sonidos");
-    els.muteToggle.title = soundMuted ? "Activar sonidos" : "Silenciar sonidos";
-    const text = els.muteToggle.querySelector(".mute-toggle__text");
-    if (text) text.textContent = soundMuted ? "MUTE" : "SONIDO";
+  // ══════════════════════════════════════════════════════════════════════════
+  // SONIDO
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function sincronizarUiSilencio() {
+    if (!dom.botonSilencio) return;
+    dom.botonSilencio.setAttribute("aria-pressed", sonidoSilenciado ? "true" : "false");
+    dom.botonSilencio.setAttribute("aria-label", sonidoSilenciado ? "Activar sonidos" : "Silenciar sonidos");
+    dom.botonSilencio.title = sonidoSilenciado ? "Activar sonidos" : "Silenciar sonidos";
+    const text = dom.botonSilencio.querySelector(".mute-toggle__text");
+    if (text) text.textContent = sonidoSilenciado ? "MUTE" : "SONIDO";
   }
 
-  function setSoundMuted(muted) {
-    soundMuted = Boolean(muted);
-    localStorage.setItem("mdr-sound-muted", soundMuted ? "1" : "0");
-    if (audioCtx) {
-      if (soundMuted && audioCtx.state === "running") audioCtx.suspend().catch(() => {});
-      if (!soundMuted && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  function establecerSonidoSilenciado(muted) {
+    sonidoSilenciado = Boolean(muted);
+    localStorage.setItem("mdr-sound-muted", sonidoSilenciado ? "1" : "0");
+    if (contextoAudio) {
+      if (sonidoSilenciado && contextoAudio.state === "running") contextoAudio.suspend().catch(() => {});
+      if (!sonidoSilenciado && contextoAudio.state === "suspended") contextoAudio.resume().catch(() => {});
     }
-    syncMuteUi();
+    sincronizarUiSilencio();
   }
 
-  function syncWheelSortUi() {
-    if (!els.wheelSort) return;
-    const label = wheelSortDir === 1 ? "A → Z" : "Z → A";
-    els.wheelSort.dataset.dir = String(wheelSortDir);
-    els.wheelSort.textContent = label;
-    els.wheelSort.title =
-      wheelSortDir === 1
+  // ══════════════════════════════════════════════════════════════════════════
+  // ORDENACIÓN DE LA RUEDA
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function sincronizarUiOrdenRueda() {
+    if (!dom.botonOrdenRueda) return;
+    const label = ordenRueda === 1 ? "A → Z" : "Z → A";
+    dom.botonOrdenRueda.dataset.dir = String(ordenRueda);
+    dom.botonOrdenRueda.textContent = label;
+    dom.botonOrdenRueda.title =
+      ordenRueda === 1
         ? "Orden alfabético A → Z (clic para invertir)"
         : "Orden alfabético Z → A (clic para invertir)";
-    els.wheelSort.setAttribute("aria-label", `Ordenar rueda por nombre. Ahora ${label}`);
+    dom.botonOrdenRueda.setAttribute("aria-label", `Ordenar rueda por nombre. Ahora ${label}`);
   }
 
-  function sortWheelByNombre(dir = wheelSortDir) {
+  function ordenarRuedaPorNombre(dir = ordenRueda) {
     if (!alumnos.length) return;
 
-    const current = alumnos[activeIndex()];
-    wheelSortDir = dir === -1 ? -1 : 1;
-    wheelSortApplied = true;
+    const current = alumnos[indiceActivo()];
+    ordenRueda = dir === -1 ? -1 : 1;
+    ordenRuedaAplicado = true;
 
     alumnos.sort(
       (a, b) =>
-        wheelSortDir *
+        ordenRueda *
         String(a.nombre || "").localeCompare(String(b.nombre || ""), "es", {
           sensitivity: "base",
           numeric: true,
@@ -309,67 +376,75 @@
 
     if (current) {
       const next = alumnos.indexOf(current);
-      spinIndex = next >= 0 ? next : 0;
+      indiceGiro = next >= 0 ? next : 0;
     } else {
-      spinIndex = 0;
+      indiceGiro = 0;
     }
 
-    syncWheelSortUi();
-    renderCards();
-    persistAlumnos();
-    setStatus(`Rueda · ${wheelSortDir === 1 ? "A → Z" : "Z → A"}`);
-    playClick();
+    sincronizarUiOrdenRueda();
+    renderizarFichas();
+    persistirAlumnos();
+    establecerEstado(`Rueda · ${ordenRueda === 1 ? "A → Z" : "Z → A"}`);
+    reproducirClic();
   }
 
-  function toggleWheelSort() {
-    if (!wheelSortApplied) {
-      sortWheelByNombre(1);
+  function alternarOrdenRueda() {
+    if (!ordenRuedaAplicado) {
+      ordenarRuedaPorNombre(1);
       return;
     }
-    sortWheelByNombre(wheelSortDir === 1 ? -1 : 1);
+    ordenarRuedaPorNombre(ordenRueda === 1 ? -1 : 1);
   }
 
-  function syncViewUi() {
-    const isTable = viewMode === "table";
-    if (els.desk) els.desk.classList.toggle("view-table", isTable);
-    if (els.tableView) els.tableView.hidden = !isTable;
-    if (els.viewToggle) {
-      els.viewToggle.setAttribute("aria-pressed", isTable ? "true" : "false");
-      els.viewToggle.setAttribute(
+  // ══════════════════════════════════════════════════════════════════════════
+  // MODOS DE VISTA (rueda / tabla)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function sincronizarUiVista() {
+    const esTabla = modoVista === "tabla";
+    if (dom.escritorio) dom.escritorio.classList.toggle("view-table", esTabla);
+    if (dom.vistaTabla) dom.vistaTabla.hidden = !esTabla;
+    if (dom.botonVista) {
+      dom.botonVista.setAttribute("aria-pressed", esTabla ? "true" : "false");
+      dom.botonVista.setAttribute(
         "aria-label",
-        isTable ? "Cambiar a vista rueda" : "Cambiar a vista tabla"
+        esTabla ? "Cambiar a vista rueda" : "Cambiar a vista tabla"
       );
-      els.viewToggle.title = isTable ? "Cambiar a vista rueda" : "Cambiar a vista tabla";
-      const text = els.viewToggle.querySelector(".view-toggle__text");
-      if (text) text.textContent = isTable ? "RUEDA" : "TABLA";
+      dom.botonVista.title = esTabla ? "Cambiar a vista rueda" : "Cambiar a vista tabla";
+      const text = dom.botonVista.querySelector(".view-toggle__text");
+      if (text) text.textContent = esTabla ? "RUEDA" : "TABLA";
     }
   }
 
-  function setViewMode(mode) {
-    viewMode = mode === "table" ? "table" : "wheel";
-    syncViewUi();
-    if (viewMode === "table") {
-      renderTableView();
-      setStatus("Vista tabla · arrastra fichas entre cursos");
+  function establecerModoVista(mode) {
+    modoVista = mode === "tabla" ? "tabla" : "rueda";
+    sincronizarUiVista();
+    if (modoVista === "tabla") {
+      renderizarVistaTabla();
+      establecerEstado("Vista tabla · arrastra fichas entre cursos");
     } else {
-      renderCards();
-      setStatus("Vista rueda · gira con el ratón o flechas");
+      renderizarFichas();
+      establecerEstado("Vista rueda · gira con el ratón o flechas");
     }
-    playClick();
+    reproducirClic();
   }
 
-  /** Per-course alphabetical sort: 1 = A→Z, -1 = Z→A */
-  const courseSortDir = new Map();
+  // ══════════════════════════════════════════════════════════════════════════
+  // VISTA TABLA — ordenación por curso
+  // ══════════════════════════════════════════════════════════════════════════
 
-  function getCourseSortDir(curso) {
-    return courseSortDir.get(curso) === -1 ? -1 : 1;
+  /** Dirección de ordenación alfabética por curso: 1 = A→Z, -1 = Z→A */
+  const ordenPorCurso = new Map();
+
+  function obtenerOrdenCurso(curso) {
+    return ordenPorCurso.get(curso) === -1 ? -1 : 1;
   }
 
-  function toggleCourseSortDir(curso) {
-    courseSortDir.set(curso, getCourseSortDir(curso) === 1 ? -1 : 1);
+  function alternarOrdenCurso(curso) {
+    ordenPorCurso.set(curso, obtenerOrdenCurso(curso) === 1 ? -1 : 1);
   }
 
-  function compareNombre(a, b, dir = 1) {
+  function compararNombre(a, b, dir = 1) {
     return (
       dir *
       String(a.alumno.nombre || "").localeCompare(String(b.alumno.nombre || ""), "es", {
@@ -379,7 +454,8 @@
     );
   }
 
-  function groupAlumnosByCurso() {
+  /** Agrupa alumnos por curso y ordena alfabéticamente dentro de cada grupo */
+  function agruparAlumnosPorCurso() {
     const groups = new Map();
     alumnos.forEach((alumno, index) => {
       const curso = String(alumno.curso || "").trim() || "Sin curso";
@@ -390,60 +466,63 @@
     return [...groups.entries()]
       .sort((a, b) => a[0].localeCompare(b[0], "es", { numeric: true, sensitivity: "base" }))
       .map(([curso, rows]) => {
-        const dir = getCourseSortDir(curso);
+        const dir = obtenerOrdenCurso(curso);
         return {
           curso,
           sortDir: dir,
-          rows: rows.sort((a, b) => compareNombre(a, b, dir)),
+          rows: rows.sort((a, b) => compararNombre(a, b, dir)),
         };
       });
   }
 
-  function cursoLabel(alumno) {
+  function etiquetaCurso(alumno) {
     return String(alumno?.curso || "").trim() || "Sin curso";
   }
 
-  function cursoValueFromLabel(label) {
+  function valorCursoDesdeEtiqueta(label) {
     return label === "Sin curso" ? "" : label;
   }
 
-  let tableDragIndex = null;
-  let suppressTableCardClick = false;
+  // ── Arrastrar y soltar en la vista tabla ─────────────────────────────────
 
-  function clearTableDropHighlights() {
-    if (!els.tableViewContent) return;
-    els.tableViewContent.querySelectorAll(".course-block.is-drop-target").forEach((el) => {
+  let indiceArrastreTabla = null;
+  let suprimirClicFichaTabla = false;
+
+  function limpiarResaltadoSoltar() {
+    if (!dom.contenidoTabla) return;
+    dom.contenidoTabla.querySelectorAll(".course-block.is-drop-target").forEach((el) => {
       el.classList.remove("is-drop-target");
     });
   }
 
-  function moveAlumnoToCurso(index, targetLabel) {
+  function moverAlumnoACurso(index, targetLabel) {
     const alumno = alumnos[index];
     if (!alumno) return false;
 
-    const fromLabel = cursoLabel(alumno);
+    const fromLabel = etiquetaCurso(alumno);
     if (fromLabel === targetLabel) return false;
 
-    alumno.curso = cursoValueFromLabel(targetLabel);
-    persistAlumnos();
-    renderTableView();
-    setStatus(`${alumno.nombre || "Ficha"} → ${targetLabel}`);
-    playClick();
+    alumno.curso = valorCursoDesdeEtiqueta(targetLabel);
+    persistirAlumnos();
+    renderizarVistaTabla();
+    establecerEstado(`${alumno.nombre || "Ficha"} → ${targetLabel}`);
+    reproducirClic();
     return true;
   }
 
-  function bindCourseDropTarget(block, curso) {
+  /** Vincula los eventos de arrastrar/soltar a un bloque de curso */
+  function vincularZonaSoltarCurso(block, curso) {
     block.dataset.curso = curso;
 
     block.addEventListener("dragover", (e) => {
-      if (tableDragIndex == null) return;
+      if (indiceArrastreTabla == null) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       block.classList.add("is-drop-target");
     });
 
     block.addEventListener("dragenter", (e) => {
-      if (tableDragIndex == null) return;
+      if (indiceArrastreTabla == null) return;
       e.preventDefault();
       block.classList.add("is-drop-target");
     });
@@ -456,16 +535,17 @@
 
     block.addEventListener("drop", (e) => {
       e.preventDefault();
-      clearTableDropHighlights();
+      limpiarResaltadoSoltar();
       const raw = e.dataTransfer.getData("text/plain");
-      const index = Number(raw !== "" ? raw : tableDragIndex);
-      tableDragIndex = null;
+      const index = Number(raw !== "" ? raw : indiceArrastreTabla);
+      indiceArrastreTabla = null;
       if (!Number.isInteger(index) || index < 0 || index >= alumnos.length) return;
-      moveAlumnoToCurso(index, curso);
+      moverAlumnoACurso(index, curso);
     });
   }
 
-  function bindTableCardDrag(card, index) {
+  /** Vincula los eventos de arrastre a una ficha de la tabla */
+  function vincularArrastreFichaTabla(card, index) {
     card.draggable = true;
 
     card.addEventListener("dragstart", (e) => {
@@ -473,48 +553,52 @@
         e.preventDefault();
         return;
       }
-      tableDragIndex = index;
-      suppressTableCardClick = false;
+      indiceArrastreTabla = index;
+      suprimirClicFichaTabla = false;
       card.classList.add("is-dragging");
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", String(index));
       try {
         e.dataTransfer.setDragImage(card, card.offsetWidth / 2, 24);
       } catch {
-        /* ignore */
+        /* ignorar */
       }
-      if (els.tableViewContent) els.tableViewContent.classList.add("is-dragging-card");
+      if (dom.contenidoTabla) dom.contenidoTabla.classList.add("is-dragging-card");
     });
 
     card.addEventListener("dragend", () => {
       card.classList.remove("is-dragging");
-      clearTableDropHighlights();
-      if (els.tableViewContent) els.tableViewContent.classList.remove("is-dragging-card");
-      if (tableDragIndex != null) {
-        suppressTableCardClick = true;
+      limpiarResaltadoSoltar();
+      if (dom.contenidoTabla) dom.contenidoTabla.classList.remove("is-dragging-card");
+      if (indiceArrastreTabla != null) {
+        suprimirClicFichaTabla = true;
         window.setTimeout(() => {
-          suppressTableCardClick = false;
+          suprimirClicFichaTabla = false;
         }, 40);
       }
-      tableDragIndex = null;
+      indiceArrastreTabla = null;
     });
   }
 
-  function renderTableView() {
-    if (!els.tableViewContent) return;
+  // ══════════════════════════════════════════════════════════════════════════
+  // RENDERIZADO — VISTA TABLA
+  // ══════════════════════════════════════════════════════════════════════════
 
-    tableDragIndex = null;
-    clearTableDropHighlights();
-    els.tableViewContent.classList.remove("is-dragging-card");
+  function renderizarVistaTabla() {
+    if (!dom.contenidoTabla) return;
+
+    indiceArrastreTabla = null;
+    limpiarResaltadoSoltar();
+    dom.contenidoTabla.classList.remove("is-dragging-card");
 
     if (!alumnos.length) {
-      els.tableViewContent.innerHTML =
+      dom.contenidoTabla.innerHTML =
         '<p class="table-view__empty">Sin fichas · crea una nueva desde el menú</p>';
       return;
     }
 
-    const groups = groupAlumnosByCurso();
-    els.tableViewContent.innerHTML = "";
+    const groups = agruparAlumnosPorCurso();
+    dom.contenidoTabla.innerHTML = "";
 
     groups.forEach(({ curso, rows, sortDir }) => {
       const block = document.createElement("section");
@@ -543,11 +627,11 @@
       );
       sortBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        toggleCourseSortDir(curso);
-        renderTableView();
-        playClick();
-        setStatus(
-          `${curso} · ${getCourseSortDir(curso) === 1 ? "A → Z" : "Z → A"}`
+        alternarOrdenCurso(curso);
+        renderizarVistaTabla();
+        reproducirClic();
+        establecerEstado(
+          `${curso} · ${obtenerOrdenCurso(curso) === 1 ? "A → Z" : "Z → A"}`
         );
       });
 
@@ -571,75 +655,87 @@
           "aria-label",
           `Abrir ficha de ${alumno.nombre || "sin nombre"}. Arrastra para cambiar de curso`
         );
-        card.innerHTML = cardHtml(alumno, index);
+        card.innerHTML = htmlFicha(alumno, index);
 
         card.addEventListener("click", (e) => {
-          if (suppressTableCardClick || e.target.closest("a.card-mail")) return;
-          openSheet(index);
+          if (suprimirClicFichaTabla || e.target.closest("a.card-mail")) return;
+          abrirFicha(index);
         });
         card.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            openSheet(index);
+            abrirFicha(index);
           }
         });
 
-        bindTableCardDrag(card, index);
+        vincularArrastreFichaTabla(card, index);
         grid.appendChild(card);
       });
 
-      bindCourseDropTarget(block, curso);
+      vincularZonaSoltarCurso(block, curso);
       block.appendChild(head);
       block.appendChild(meta);
       block.appendChild(grid);
-      els.tableViewContent.appendChild(block);
+      dom.contenidoTabla.appendChild(block);
     });
   }
 
-  function refreshViews() {
-    if (viewMode === "table") renderTableView();
-    else renderCards();
+  /** Refresca la vista activa (rueda o tabla) */
+  function actualizarVistas() {
+    if (modoVista === "tabla") renderizarVistaTabla();
+    else renderizarFichas();
   }
 
-  function playClick() {
-    if (soundMuted) return;
+  // ══════════════════════════════════════════════════════════════════════════
+  // SONIDO DE CLIC
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Reproduce un breve sonido de clic mecánico */
+  function reproducirClic() {
+    if (sonidoSilenciado) return;
     try {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
-      const t = audioCtx.currentTime;
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
+      if (!contextoAudio) contextoAudio = new (window.AudioContext || window.webkitAudioContext)();
+      if (contextoAudio.state === "suspended") contextoAudio.resume().catch(() => {});
+      const t = contextoAudio.currentTime;
+      const osc = contextoAudio.createOscillator();
+      const gain = contextoAudio.createGain();
       osc.type = "sawtooth";
       osc.frequency.setValueAtTime(320, t);
       osc.frequency.exponentialRampToValueAtTime(40, t + 0.05);
       gain.gain.setValueAtTime(0.06, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
       osc.connect(gain);
-      gain.connect(audioCtx.destination);
+      gain.connect(contextoAudio.destination);
       osc.start(t);
       osc.stop(t + 0.08);
     } catch {
-      /* ignore */
+      /* ignorar */
     }
   }
 
-  function extraEntries(alumno) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // RENDERIZADO — FICHAS EN LA RUEDA
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Devuelve las entradas de campos extra (no canónicos) de un alumno */
+  function entradasExtra(alumno) {
     return Object.entries(alumno || {}).filter(
-      ([k, v]) => !CORE_KEYS.has(k) && v != null && String(v).trim() !== ""
+      ([k, v]) => !CLAVES_NUCLEO.has(k) && v != null && String(v).trim() !== ""
     );
   }
 
-  function cardHtml(alumno, index) {
+  /** Genera el HTML interno de una ficha (usado en rueda y tabla) */
+  function htmlFicha(alumno, index) {
     const bits = [];
     if (alumno.curso) {
-      bits.push(`<p><span class="field-label">Curso</span> ${escapeHtml(alumno.curso)}</p>`);
+      bits.push(`<p><span class="field-label">Curso</span> ${escaparHtml(alumno.curso)}</p>`);
     }
     if (alumno.telefono) {
-      bits.push(`<p><span class="field-label">Tel.</span> ${escapeHtml(alumno.telefono)}</p>`);
+      bits.push(`<p><span class="field-label">Tel.</span> ${escaparHtml(alumno.telefono)}</p>`);
     }
     if (alumno.email) {
       const raw = String(alumno.email).trim();
-      const mail = escapeHtml(raw);
+      const mail = escaparHtml(raw);
       bits.push(
         `<p><span class="field-label">Mail</span> <a class="card-mail" href="mailto:${encodeURIComponent(raw)}" title="Escribir a ${mail}">${mail}</a></p>`
       );
@@ -648,69 +744,75 @@
     return `
       <span class="card-index">N.º ${String(index + 1).padStart(3, "0")}</span>
       <div>
-        <h3>${escapeHtml(alumno.nombre || "Sin nombre")}</h3>
+        <h3>${escaparHtml(alumno.nombre || "Sin nombre")}</h3>
         ${bits.join("")}
       </div>
-      <span class="badge">${escapeHtml(alumno.instrumento || "Sin instrumento")}</span>
+      <span class="badge">${escaparHtml(alumno.instrumento || "Sin instrumento")}</span>
     `;
   }
 
-  function visibleIndices() {
+  /** Calcula qué índices de alumnos son visibles en la rueda */
+  function indicesVisibles() {
     const n = alumnos.length;
-    const current = activeIndex();
+    const current = indiceActivo();
     if (!n) return [];
-    if (n <= VISIBLE_SPAN * 2 + 1) {
+    if (n <= RANGO_VISIBLE * 2 + 1) {
       return Array.from({ length: n }, (_, i) => i);
     }
     const out = [];
-    for (let d = -VISIBLE_SPAN; d <= VISIBLE_SPAN; d++) {
+    for (let d = -RANGO_VISIBLE; d <= RANGO_VISIBLE; d++) {
       out.push((current + d + n * 10) % n);
     }
     return out;
   }
 
-  function renderCards() {
-    const current = activeIndex();
-    els.rolodex.innerHTML = "";
+  /** Renderiza las fichas visibles en la rueda 3D */
+  function renderizarFichas() {
+    const current = indiceActivo();
+    dom.rolodex.innerHTML = "";
 
-    visibleIndices().forEach((index) => {
+    indicesVisibles().forEach((index) => {
       const card = document.createElement("article");
       card.className = "card" + (index === current ? " is-active" : "");
       card.dataset.index = String(index);
-      card.style.transform = cardTransform(index);
-      card.innerHTML = cardHtml(alumnos[index], index);
-      els.rolodex.appendChild(card);
+      card.style.transform = transformacionFicha(index);
+      card.innerHTML = htmlFicha(alumnos[index], index);
+      dom.rolodex.appendChild(card);
     });
 
-    updateRotation(false);
+    actualizarRotacion(false);
   }
 
-  function updateRotation(animate = true) {
-    const current = activeIndex();
-    els.rolodex.classList.toggle("is-spinning", animate);
-    /* spinIndex is continuous → last→first keeps rotating forward */
-    els.rolodex.style.transform = `rotateX(${spinIndex * CARD_ANGLE}deg)`;
+  /** Actualiza la rotación CSS de la rueda y marca la ficha activa */
+  function actualizarRotacion(animate = true) {
+    const current = indiceActivo();
+    dom.rolodex.classList.toggle("is-spinning", animate);
+    dom.rolodex.style.transform = `rotateX(${indiceGiro * ANGULO_FICHA}deg)`;
 
-    els.rolodex.querySelectorAll(".card").forEach((card) => {
+    dom.rolodex.querySelectorAll(".card").forEach((card) => {
       const idx = Number(card.dataset.index);
       const on = idx === current;
       card.classList.toggle("is-active", on);
-      card.style.transform = cardTransform(idx);
+      card.style.transform = transformacionFicha(idx);
       card.style.pointerEvents = on ? "auto" : "none";
     });
 
-    updateCounter();
+    actualizarContador();
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // NAVEGACIÓN DE LA RUEDA
+  // ══════════════════════════════════════════════════════════════════════════
+
   /**
-   * Move wheel to a data index without reversing at the wrap.
-   * shortest=true picks nearest direction (search); false keeps current spin and adds delta.
+   * Mueve la rueda a un índice de datos sin invertir en el borde.
+   * shortest=true elige la dirección más corta (búsqueda); false mantiene el giro actual.
    */
-  function goTo(targetIndex, { sound = true, rebuild = true, shortest = true } = {}) {
+  function irA(targetIndex, { sound = true, rebuild = true, shortest = true } = {}) {
     if (!alumnos.length) return;
     const n = alumnos.length;
     const normalized = ((targetIndex % n) + n) % n;
-    const current = activeIndex();
+    const current = indiceActivo();
 
     let delta = normalized - current;
     if (shortest) {
@@ -718,39 +820,43 @@
       if (delta < -n / 2) delta += n;
     }
 
-    spinIndex += delta;
+    indiceGiro += delta;
 
-    if (rebuild || alumnos.length > VISIBLE_SPAN * 2 + 1) renderCards();
-    else updateRotation(true);
+    if (rebuild || alumnos.length > RANGO_VISIBLE * 2 + 1) renderizarFichas();
+    else actualizarRotacion(true);
 
-    if (sound && delta !== 0) playClick();
+    if (sound && delta !== 0) reproducirClic();
   }
 
-  function step(delta) {
-    if (viewMode === "table") return;
-    if (!alumnos.length || wheelLock || isModalOpen()) return;
-    wheelLock = true;
-    spinIndex += delta;
-    const needsRebuild = alumnos.length > VISIBLE_SPAN * 2 + 1;
-    if (needsRebuild) renderCards();
-    else updateRotation(true);
-    playClick();
+  /** Avanza la rueda un paso en la dirección indicada */
+  function avanzar(delta) {
+    if (modoVista === "tabla") return;
+    if (!alumnos.length || bloqueoRueda || modalAbierto()) return;
+    bloqueoRueda = true;
+    indiceGiro += delta;
+    const needsRebuild = alumnos.length > RANGO_VISIBLE * 2 + 1;
+    if (needsRebuild) renderizarFichas();
+    else actualizarRotacion(true);
+    reproducirClic();
     window.setTimeout(() => {
-      wheelLock = false;
+      bloqueoRueda = false;
     }, 120);
   }
 
-  /* —— Search —— */
-  function closeSearch() {
-    els.searchResults.hidden = true;
-    els.searchResults.innerHTML = "";
-    els.searchInput.setAttribute("aria-expanded", "false");
+  // ══════════════════════════════════════════════════════════════════════════
+  // BÚSQUEDA
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function cerrarBusqueda() {
+    dom.resultadosBusqueda.hidden = true;
+    dom.resultadosBusqueda.innerHTML = "";
+    dom.entradaBusqueda.setAttribute("aria-expanded", "false");
   }
 
-  function openSearch(matches) {
-    els.searchResults.innerHTML = "";
+  function abrirBusqueda(matches) {
+    dom.resultadosBusqueda.innerHTML = "";
     if (!matches.length) {
-      closeSearch();
+      cerrarBusqueda();
       return;
     }
 
@@ -760,82 +866,89 @@
       li.setAttribute("aria-selected", i === 0 ? "true" : "false");
       li.dataset.index = String(index);
       li.innerHTML = `
-        <strong>${escapeHtml(alumno.nombre || "Sin nombre")}</strong>
-        <span class="meta">${escapeHtml(alumno.instrumento || "—")} · ${escapeHtml(alumno.curso || "—")}</span>
+        <strong>${escaparHtml(alumno.nombre || "Sin nombre")}</strong>
+        <span class="meta">${escaparHtml(alumno.instrumento || "—")} · ${escaparHtml(alumno.curso || "—")}</span>
       `;
       li.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        goTo(index);
-        els.searchInput.value = alumno.nombre || "";
-        closeSearch();
-        setImportMenuOpen(false);
-        setStatus(`Ficha: ${alumno.nombre}`);
-        if (viewMode === "table") openSheet(index);
+        irA(index);
+        dom.entradaBusqueda.value = alumno.nombre || "";
+        cerrarBusqueda();
+        establecerMenuImportacion(false);
+        establecerEstado(`Ficha: ${alumno.nombre}`);
+        if (modoVista === "tabla") abrirFicha(index);
       });
-      els.searchResults.appendChild(li);
+      dom.resultadosBusqueda.appendChild(li);
     });
 
-    els.searchResults.hidden = false;
-    els.searchInput.setAttribute("aria-expanded", "true");
+    dom.resultadosBusqueda.hidden = false;
+    dom.entradaBusqueda.setAttribute("aria-expanded", "true");
   }
 
-  function searchableBlob(alumno) {
-    return normalizeKey(
+  /** Construye un blob de texto buscable a partir de todos los valores de un alumno */
+  function textoBuscable(alumno) {
+    return normalizarClave(
       [...Object.values(alumno)].filter((v) => v != null && String(v).trim()).join(" ")
     );
   }
 
-  function runSearch(query) {
-    const q = normalizeKey(query);
+  function ejecutarBusqueda(query) {
+    const q = normalizarClave(query);
     if (!q) {
-      closeSearch();
+      cerrarBusqueda();
       return;
     }
 
     const matches = alumnos
       .map((alumno, index) => ({ alumno, index }))
-      .filter(({ alumno }) => searchableBlob(alumno).includes(q));
+      .filter(({ alumno }) => textoBuscable(alumno).includes(q));
 
-    openSearch(matches);
+    abrirBusqueda(matches);
 
-    if (matches.length === 1) goTo(matches[0].index, { sound: true });
-    else if (matches.length > 1) goTo(matches[0].index, { sound: false });
+    if (matches.length === 1) irA(matches[0].index, { sound: true });
+    else if (matches.length > 1) irA(matches[0].index, { sound: false });
   }
 
-  /* —— Import / column mapping —— */
-  function detectCsvSep(text) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // IMPORTACIÓN — MAPEO DE COLUMNAS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Detecta el separador CSV (coma o punto y coma) */
+  function detectarSeparadorCsv(text) {
     const sample = text.split(/\r?\n/, 3).join("\n");
     const commas = (sample.match(/,/g) || []).length;
     const semis = (sample.match(/;/g) || []).length;
     return semis > commas ? ";" : ",";
   }
 
-  function parseRawRows(data, isCsv) {
+  /** Parsea filas crudas desde CSV o Excel usando SheetJS */
+  function parsearFilasCrudas(data, isCsv) {
     const wb = isCsv
-      ? XLSX.read(data, { type: "string", FS: detectCsvSep(data) })
+      ? XLSX.read(data, { type: "string", FS: detectarSeparadorCsv(data) })
       : XLSX.read(data, { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
     return { sheetName: wb.SheetNames[0], rows };
   }
 
-  function openImportMapper({ fileName, sheetName, rows }) {
+  /** Abre el modal de mapeo de columnas para una importación */
+  function abrirMapeadorImportacion({ fileName, sheetName, rows }) {
     if (!rows.length) {
-      setStatus("El archivo no tiene filas");
+      establecerEstado("El archivo no tiene filas");
       return;
     }
 
     const headers = Object.keys(rows[0]);
     const used = new Set();
 
-    pendingImport = { fileName, sheetName, rows, headers };
+    importacionPendiente = { fileName, sheetName, rows, headers };
 
-    els.importSubtitle.textContent = `${fileName} · hoja “${sheetName}” · ${rows.length} filas`;
-    els.importPreview.textContent = `Vista previa: ${headers.slice(0, 5).join(" · ")}${headers.length > 5 ? "…" : ""}`;
-    els.mapBody.innerHTML = "";
+    dom.subtituloImportacion.textContent = `${fileName} · hoja "${sheetName}" · ${rows.length} filas`;
+    dom.previsualizacion.textContent = `Vista previa: ${headers.slice(0, 5).join(" · ")}${headers.length > 5 ? "…" : ""}`;
+    dom.cuerpoMapa.innerHTML = "";
 
     headers.forEach((header) => {
-      let suggested = guessField(header);
+      let suggested = adivinarCampo(header);
       if (suggested && used.has(suggested)) suggested = "";
       if (suggested) used.add(suggested);
 
@@ -843,73 +956,77 @@
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td><strong>${escapeHtml(header)}</strong></td>
+        <td><strong>${escaparHtml(header)}</strong></td>
         <td></td>
-        <td class="sample" title="${escapeHtml(sample)}">${escapeHtml(sample)}</td>
+        <td class="sample" title="${escaparHtml(sample)}">${escaparHtml(sample)}</td>
       `;
 
       const select = document.createElement("select");
       select.dataset.header = header;
       select.innerHTML =
         `<option value="">— Ignorar —</option>` +
-        CANONICAL_FIELDS.map(
+        CAMPOS_CANONICOS.map(
           (f) => `<option value="${f.id}"${f.id === suggested ? " selected" : ""}>${f.label}</option>`
         ).join("") +
         `<option value="__custom__">Campo extra (mismo nombre)</option>`;
 
-      if (!suggested && normalizeKey(header) && !guessField(header)) {
-        /* leave ignore; user can pick custom */
+      if (!suggested && normalizarClave(header) && !adivinarCampo(header)) {
+        /* dejar en ignorar; el usuario puede elegir custom */
       }
 
       tr.children[1].appendChild(select);
-      els.mapBody.appendChild(tr);
+      dom.cuerpoMapa.appendChild(tr);
     });
 
-    /* ensure at least one nombre mapping if possible */
-    const nombreSelect = [...els.mapBody.querySelectorAll("select")].find((s) => s.value === "nombre");
+    const nombreSelect = [...dom.cuerpoMapa.querySelectorAll("select")].find((s) => s.value === "nombre");
     if (!nombreSelect) {
-      const first = els.mapBody.querySelector("select");
+      const first = dom.cuerpoMapa.querySelector("select");
       if (first) first.value = "nombre";
     }
 
-    els.importOverlay.hidden = false;
-    setModalOpen(true);
+    dom.overlayImportacion.hidden = false;
+    establecerModal(true);
   }
 
-  function closeImportMapper() {
-    els.importOverlay.hidden = true;
-    pendingImport = null;
-    setModalOpen(!els.sheetOverlay.hidden);
+  function cerrarMapeadorImportacion() {
+    dom.overlayImportacion.hidden = true;
+    importacionPendiente = null;
+    establecerModal(!dom.overlayFicha.hidden);
   }
 
-  function resolveImportMode(mode) {
-    els.importModeOverlay.hidden = true;
-    setModalOpen(!els.importOverlay.hidden || !els.sheetOverlay.hidden);
-    const resolve = importModeResolver;
-    importModeResolver = null;
+  // ── Selección de modo de importación ─────────────────────────────────────
+
+  /** Completa la promesa del modo de importación elegido por el usuario */
+  function completarModoImportacion(mode) {
+    dom.overlayModo.hidden = true;
+    establecerModal(!dom.overlayImportacion.hidden || !dom.overlayFicha.hidden);
+    const resolve = resolverModoImportacion;
+    resolverModoImportacion = null;
     if (resolve) resolve(mode);
   }
 
-  function askImportMode(incomingCount) {
-    if (!alumnos.length) return Promise.resolve("replace");
+  /** Muestra el modal preguntando si reemplazar, añadir o cancelar */
+  function pedirModoImportacion(incomingCount) {
+    if (!alumnos.length) return Promise.resolve("reemplazar");
 
-    els.importModeSubtitle.textContent =
+    dom.subtituloModo.textContent =
       `Hay ${alumnos.length} fichas ahora. El archivo trae ${incomingCount}. ` +
       `¿Sobrescribir la base o añadir las nuevas?`;
-    els.importModeOverlay.hidden = false;
-    setModalOpen(true);
+    dom.overlayModo.hidden = false;
+    establecerModal(true);
 
     return new Promise((resolve) => {
-      importModeResolver = resolve;
+      resolverModoImportacion = resolve;
     });
   }
 
-  async function applyImportMapping() {
-    if (!pendingImport) return;
+  /** Aplica el mapeo de columnas confirmado y procede a cargar */
+  async function aplicarMapeoImportacion() {
+    if (!importacionPendiente) return;
 
-    const selects = [...els.mapBody.querySelectorAll("select")];
-    const mapping = {}; // header -> field id or __custom__
-    const claimed = new Map(); // field -> header
+    const selects = [...dom.cuerpoMapa.querySelectorAll("select")];
+    const mapping = {};
+    const claimed = new Map();
 
     for (const sel of selects) {
       const header = sel.dataset.header;
@@ -918,7 +1035,7 @@
 
       if (value !== "__custom__") {
         if (claimed.has(value)) {
-          setStatus(`El campo “${value}” está asignado dos veces`);
+          establecerEstado(`El campo "${value}" está asignado dos veces`);
           return;
         }
         claimed.set(value, header);
@@ -927,11 +1044,11 @@
     }
 
     if (![...Object.values(mapping)].includes("nombre") && !claimed.has("nombre")) {
-      setStatus("Asigna al menos una columna a Nombre");
+      establecerEstado("Asigna al menos una columna a Nombre");
       return;
     }
 
-    const list = pendingImport.rows
+    const list = importacionPendiente.rows
       .map((row) => {
         const out = {};
         for (const [header, target] of Object.entries(mapping)) {
@@ -946,100 +1063,109 @@
       .filter((r) => r.nombre);
 
     if (!list.length) {
-      setStatus("No se encontraron filas con nombre");
+      establecerEstado("No se encontraron filas con nombre");
       return;
     }
 
-    const label = pendingImport.fileName;
-    const mode = await askImportMode(list.length);
-    if (mode === "cancel") return;
+    const label = importacionPendiente.fileName;
+    const mode = await pedirModoImportacion(list.length);
+    if (mode === "cancelar") return;
 
-    closeImportMapper();
-    loadAlumnos(list, label, mode);
+    cerrarMapeadorImportacion();
+    cargarAlumnos(list, label, mode);
   }
 
-  function loadAlumnos(list, label, mode = "replace") {
+  // ══════════════════════════════════════════════════════════════════════════
+  // CARGA DE ALUMNOS
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Carga una lista de alumnos en la app (reemplazando o añadiendo) */
+  function cargarAlumnos(list, label, mode = "reemplazar") {
     if (!list.length) {
-      setStatus("No se encontraron filas con nombre");
+      establecerEstado("No se encontraron filas con nombre");
       return;
     }
 
-    if (mode === "append") {
+    if (mode === "anadir") {
       const before = alumnos.length;
       alumnos = alumnos.concat(list);
-      spinIndex = before; /* first newly added */
-      refreshViews();
-      setStatus(`${list.length} añadidas · total ${alumnos.length} · ${label}`);
+      indiceGiro = before;
+      actualizarVistas();
+      establecerEstado(`${list.length} añadidas · total ${alumnos.length} · ${label}`);
     } else {
       alumnos = list;
-      spinIndex = 0;
-      refreshViews();
-      setStatus(`${list.length} fichas · ${label}`);
+      indiceGiro = 0;
+      actualizarVistas();
+      establecerEstado(`${list.length} fichas · ${label}`);
     }
 
-    playClick();
-    persistAlumnos();
+    reproducirClic();
+    persistirAlumnos();
   }
 
-  /* —— Ficha abierta / edición —— */
-  function openSheet(index = activeIndex()) {
+  // ══════════════════════════════════════════════════════════════════════════
+  // FICHA ABIERTA — VISUALIZACIÓN Y EDICIÓN
+  // ══════════════════════════════════════════════════════════════════════════
+
+  function abrirFicha(index = indiceActivo()) {
     if (!alumnos.length) return;
     const i = ((index % alumnos.length) + alumnos.length) % alumnos.length;
-    if (i !== activeIndex()) goTo(i, { sound: false });
+    if (i !== indiceActivo()) irA(i, { sound: false });
 
-    isDraftNew = false;
-    sheetEditing = false;
-    renderSheet();
-    els.sheetOverlay.hidden = false;
-    setModalOpen(true);
-    playClick();
+    esBorradorNuevo = false;
+    editandoFicha = false;
+    renderizarFicha();
+    dom.overlayFicha.hidden = false;
+    establecerModal(true);
+    reproducirClic();
   }
 
-  function closeSheet() {
-    if (isDraftNew) {
-      isDraftNew = false;
-      sheetEditing = false;
-      els.sheetForm.reset();
-      els.sheetExtraFields.innerHTML = "";
-      els.sheetOverlay.hidden = true;
-      setModalOpen(!els.importOverlay.hidden);
-      setStatus("Nueva ficha cancelada");
+  function cerrarFicha() {
+    if (esBorradorNuevo) {
+      esBorradorNuevo = false;
+      editandoFicha = false;
+      dom.formularioFicha.reset();
+      dom.camposExtra.innerHTML = "";
+      dom.overlayFicha.hidden = true;
+      establecerModal(!dom.overlayImportacion.hidden);
+      establecerEstado("Nueva ficha cancelada");
       return;
     }
-    sheetEditing = false;
-    els.sheetOverlay.hidden = true;
-    setModalOpen(!els.importOverlay.hidden);
+    editandoFicha = false;
+    dom.overlayFicha.hidden = true;
+    establecerModal(!dom.overlayImportacion.hidden);
   }
 
-  function renderSheet() {
-    const alumno = isDraftNew ? {} : alumnos[activeIndex()];
-    if (!isDraftNew && !alumno) return;
+  /** Renderiza el contenido del modal de ficha (vista o formulario) */
+  function renderizarFicha() {
+    const alumno = esBorradorNuevo ? {} : alumnos[indiceActivo()];
+    if (!esBorradorNuevo && !alumno) return;
 
-    els.sheetNum.textContent = isDraftNew
+    dom.numFicha.textContent = esBorradorNuevo
       ? `Nueva ficha · pendiente de guardar`
-      : `Ficha N.º ${String(activeIndex() + 1).padStart(3, "0")} · ${activeIndex() + 1} / ${alumnos.length}`;
+      : `Ficha N.º ${String(indiceActivo() + 1).padStart(3, "0")} · ${indiceActivo() + 1} / ${alumnos.length}`;
 
-    if (sheetEditing || isDraftNew) {
-      els.sheetView.hidden = true;
-      els.sheetForm.hidden = false;
-      els.sheetEdit.hidden = true;
-      els.sheetCancelEdit.hidden = false;
-      els.sheetSave.hidden = false;
-      els.sheetDelete.hidden = isDraftNew;
+    if (editandoFicha || esBorradorNuevo) {
+      dom.vistaFicha.hidden = true;
+      dom.formularioFicha.hidden = false;
+      dom.btnEditar.hidden = true;
+      dom.btnCancelarEdicion.hidden = false;
+      dom.btnGuardar.hidden = false;
+      dom.btnEliminar.hidden = esBorradorNuevo;
 
-      if (isDraftNew) {
-        els.sheetForm.reset();
-        els.sheetExtraFields.innerHTML = "";
+      if (esBorradorNuevo) {
+        dom.formularioFicha.reset();
+        dom.camposExtra.innerHTML = "";
       } else {
-        for (const field of CANONICAL_FIELDS) {
-          const input = els.sheetForm.querySelector(`[name="${field.id}"]`);
+        for (const field of CAMPOS_CANONICOS) {
+          const input = dom.formularioFicha.querySelector(`[name="${field.id}"]`);
           if (!input) continue;
           const raw = alumno[field.id] ?? "";
-          input.value = field.id === "telefono" ? digitsOnly(raw) : raw;
+          input.value = field.id === "telefono" ? soloDigitos(raw) : raw;
         }
 
-        els.sheetExtraFields.innerHTML = "";
-        extraEntries(alumno).forEach(([key, val]) => {
+        dom.camposExtra.innerHTML = "";
+        entradasExtra(alumno).forEach(([key, val]) => {
           const label = document.createElement("label");
           const caption = document.createElement("span");
           caption.textContent = key;
@@ -1047,53 +1173,53 @@
           input.name = `extra:${key}`;
           input.value = val ?? "";
           label.append(caption, input);
-          els.sheetExtraFields.appendChild(label);
+          dom.camposExtra.appendChild(label);
         });
       }
     } else {
-      els.sheetForm.hidden = true;
-      els.sheetView.hidden = false;
-      els.sheetEdit.hidden = false;
-      els.sheetCancelEdit.hidden = true;
-      els.sheetSave.hidden = true;
-      els.sheetDelete.hidden = false;
+      dom.formularioFicha.hidden = true;
+      dom.vistaFicha.hidden = false;
+      dom.btnEditar.hidden = false;
+      dom.btnCancelarEdicion.hidden = true;
+      dom.btnGuardar.hidden = true;
+      dom.btnEliminar.hidden = false;
 
-      els.sheetForm.reset();
-      els.sheetExtraFields.innerHTML = "";
+      dom.formularioFicha.reset();
+      dom.camposExtra.innerHTML = "";
 
-      const extras = extraEntries(alumno)
+      const extras = entradasExtra(alumno)
         .map(
           ([k, v]) => `
           <div>
-            <dt>${escapeHtml(k)}</dt>
-            <dd>${escapeHtml(v)}</dd>
+            <dt>${escaparHtml(k)}</dt>
+            <dd>${escaparHtml(v)}</dd>
           </div>`
         )
         .join("");
 
-      els.sheetView.innerHTML = `
-        <h3 id="sheetDialogTitle">${escapeHtml(alumno.nombre || "Sin nombre")}</h3>
-        <span class="badge">${escapeHtml(alumno.instrumento || "Sin instrumento")}</span>
+      dom.vistaFicha.innerHTML = `
+        <h3 id="sheetDialogTitle">${escaparHtml(alumno.nombre || "Sin nombre")}</h3>
+        <span class="badge">${escaparHtml(alumno.instrumento || "Sin instrumento")}</span>
         <dl>
           <div>
             <dt>Curso</dt>
-            <dd>${escapeHtml(alumno.curso || "—")}</dd>
+            <dd>${escaparHtml(alumno.curso || "—")}</dd>
           </div>
           <div>
             <dt>Dirección</dt>
-            <dd>${escapeHtml(alumno.direccion || "—")}</dd>
+            <dd>${escaparHtml(alumno.direccion || "—")}</dd>
           </div>
           <div>
             <dt>Teléfono</dt>
-            <dd>${escapeHtml(alumno.telefono || "—")}</dd>
+            <dd>${escaparHtml(alumno.telefono || "—")}</dd>
           </div>
           <div>
             <dt>Email</dt>
-            <dd>${escapeHtml(alumno.email || "—")}</dd>
+            <dd>${escaparHtml(alumno.email || "—")}</dd>
           </div>
           <div>
             <dt>Notas</dt>
-            <dd>${escapeHtml(alumno.notas || "—")}</dd>
+            <dd>${escaparHtml(alumno.notas || "—")}</dd>
           </div>
           ${extras}
         </dl>
@@ -1101,252 +1227,259 @@
     }
   }
 
-  function saveSheet() {
-    const next = isDraftNew ? {} : { ...alumnos[activeIndex()] };
+  /** Guarda la ficha actual (nueva o editada) */
+  function guardarFicha() {
+    const next = esBorradorNuevo ? {} : { ...alumnos[indiceActivo()] };
 
-    for (const field of CANONICAL_FIELDS) {
-      const input = els.sheetForm.querySelector(`[name="${field.id}"]`);
+    for (const field of CAMPOS_CANONICOS) {
+      const input = dom.formularioFicha.querySelector(`[name="${field.id}"]`);
       if (!input) continue;
       let value = input.value.trim();
-      if (field.id === "telefono") value = digitsOnly(value);
+      if (field.id === "telefono") value = soloDigitos(value);
       next[field.id] = value;
     }
 
     if (!next.nombre) {
-      setStatus("El nombre no puede quedar vacío");
+      establecerEstado("El nombre no puede quedar vacío");
       return;
     }
 
-    if (!isDraftNew) {
-      extraEntries(alumnos[activeIndex()]).forEach(([key]) => {
+    if (!esBorradorNuevo) {
+      entradasExtra(alumnos[indiceActivo()]).forEach(([key]) => {
         delete next[key];
       });
     }
-    [...els.sheetExtraFields.querySelectorAll("input")].forEach((input) => {
+    [...dom.camposExtra.querySelectorAll("input")].forEach((input) => {
       const key = input.name.replace(/^extra:/, "");
       if (input.value.trim()) next[key] = input.value.trim();
     });
 
-    if (isDraftNew) {
+    if (esBorradorNuevo) {
       alumnos.push(next);
-      spinIndex = alumnos.length - 1;
-      isDraftNew = false;
-      sheetEditing = false;
-      refreshViews();
-      persistAlumnos();
-      renderSheet();
-      setStatus(`Creada: ${next.nombre}`);
-      playClick();
+      indiceGiro = alumnos.length - 1;
+      esBorradorNuevo = false;
+      editandoFicha = false;
+      actualizarVistas();
+      persistirAlumnos();
+      renderizarFicha();
+      establecerEstado(`Creada: ${next.nombre}`);
+      reproducirClic();
       return;
     }
 
-    const i = activeIndex();
+    const i = indiceActivo();
     alumnos[i] = next;
-    sheetEditing = false;
-    renderSheet();
-    refreshViews();
-    setStatus(`Guardado: ${next.nombre}`);
-    playClick();
-    persistAlumnos();
+    editandoFicha = false;
+    renderizarFicha();
+    actualizarVistas();
+    establecerEstado(`Guardado: ${next.nombre}`);
+    reproducirClic();
+    persistirAlumnos();
   }
 
-  function createNewFicha() {
-    isDraftNew = true;
-    sheetEditing = true;
-    setImportMenuOpen(false);
-    els.sheetOverlay.hidden = false;
-    setModalOpen(true);
-    renderSheet();
+  /** Crea una nueva ficha en blanco y abre el formulario */
+  function crearNuevaFicha() {
+    esBorradorNuevo = true;
+    editandoFicha = true;
+    establecerMenuImportacion(false);
+    dom.overlayFicha.hidden = false;
+    establecerModal(true);
+    renderizarFicha();
 
-    const nombreInput = els.sheetForm.querySelector('[name="nombre"]');
+    const nombreInput = dom.formularioFicha.querySelector('[name="nombre"]');
     if (nombreInput) {
       window.setTimeout(() => nombreInput.focus(), 50);
     }
-    setStatus("Nueva ficha · guarda para crearla");
-    playClick();
+    establecerEstado("Nueva ficha · guarda para crearla");
+    reproducirClic();
   }
 
-  function deleteCurrentFicha() {
-    if (isDraftNew) {
-      closeSheet();
+  /** Elimina la ficha actual previa confirmación */
+  function eliminarFichaActual() {
+    if (esBorradorNuevo) {
+      cerrarFicha();
       return;
     }
     if (!alumnos.length) return;
-    const i = activeIndex();
+    const i = indiceActivo();
     const nombre = alumnos[i]?.nombre || "esta ficha";
-    const ok = window.confirm(`¿Eliminar la ficha de “${nombre}”? Esta acción no se puede deshacer.`);
+    const ok = window.confirm(`¿Eliminar la ficha de "${nombre}"? Esta acción no se puede deshacer.`);
     if (!ok) return;
 
     alumnos.splice(i, 1);
-    sheetEditing = false;
+    editandoFicha = false;
 
     if (!alumnos.length) {
-      closeSheet();
-      spinIndex = 0;
-      refreshViews();
-      persistAlumnos();
-      setStatus("Sin fichas · crea una nueva desde el menú");
-      playClick();
+      cerrarFicha();
+      indiceGiro = 0;
+      actualizarVistas();
+      persistirAlumnos();
+      establecerEstado("Sin fichas · crea una nueva desde el menú");
+      reproducirClic();
       return;
     }
 
-    spinIndex = Math.min(i, alumnos.length - 1);
-    refreshViews();
-    persistAlumnos();
-    renderSheet();
-    setStatus(`Eliminada: ${nombre}`);
-    playClick();
+    indiceGiro = Math.min(i, alumnos.length - 1);
+    actualizarVistas();
+    persistirAlumnos();
+    renderizarFicha();
+    establecerEstado(`Eliminada: ${nombre}`);
+    reproducirClic();
   }
 
-  /* —— Events —— */
-  els.rolodex.addEventListener("click", (e) => {
+  // ══════════════════════════════════════════════════════════════════════════
+  // EVENTOS DEL DOM
+  // ══════════════════════════════════════════════════════════════════════════
+
+  dom.rolodex.addEventListener("click", (e) => {
     const mailLink = e.target.closest("a.card-mail");
     if (mailLink) {
       e.stopPropagation();
       return;
     }
     const card = e.target.closest(".card.is-active");
-    if (card) openSheet(Number(card.dataset.index));
+    if (card) abrirFicha(Number(card.dataset.index));
   });
 
-  els.stage.addEventListener(
+  dom.escenario.addEventListener(
     "wheel",
     (e) => {
-      if (viewMode === "table" || isModalOpen()) return;
+      if (modoVista === "tabla" || modalAbierto()) return;
       e.preventDefault();
-      step(e.deltaY > 0 ? 1 : -1);
+      avanzar(e.deltaY > 0 ? 1 : -1);
     },
     { passive: false }
   );
 
   document.addEventListener("keydown", (e) => {
-    if (!els.importModeOverlay.hidden) {
+    if (!dom.overlayModo.hidden) {
       if (e.key === "Escape") {
         e.preventDefault();
-        resolveImportMode("cancel");
+        completarModoImportacion("cancelar");
       }
       return;
     }
 
-    if (!els.importOverlay.hidden) {
+    if (!dom.overlayImportacion.hidden) {
       if (e.key === "Escape") {
         e.preventDefault();
-        closeImportMapper();
+        cerrarMapeadorImportacion();
       }
       return;
     }
 
-    if (!els.sheetOverlay.hidden) {
+    if (!dom.overlayFicha.hidden) {
       if (e.key === "Escape") {
         e.preventDefault();
-        if (isDraftNew) {
-          closeSheet();
-        } else if (sheetEditing) {
-          sheetEditing = false;
-          renderSheet();
+        if (esBorradorNuevo) {
+          cerrarFicha();
+        } else if (editandoFicha) {
+          editandoFicha = false;
+          renderizarFicha();
         } else {
-          closeSheet();
+          cerrarFicha();
         }
       }
       return;
     }
 
-    if (isImportMenuOpen() && e.key === "Escape") {
+    if (menuImportacionAbierto() && e.key === "Escape") {
       e.preventDefault();
-      setImportMenuOpen(false);
+      establecerMenuImportacion(false);
       return;
     }
 
-    if (e.target === els.searchInput) {
-      if (e.key === "Escape") closeSearch();
+    if (e.target === dom.entradaBusqueda) {
+      if (e.key === "Escape") cerrarBusqueda();
       if (e.key === "Enter") {
-        const first = els.searchResults.querySelector("li");
+        const first = dom.resultadosBusqueda.querySelector("li");
         if (first) {
           e.preventDefault();
           const idx = Number(first.dataset.index);
-          goTo(idx);
-          closeSearch();
-          setImportMenuOpen(false);
-          if (viewMode === "table") openSheet(idx);
+          irA(idx);
+          cerrarBusqueda();
+          establecerMenuImportacion(false);
+          if (modoVista === "tabla") abrirFicha(idx);
         }
       }
       return;
     }
 
     if (e.key === "ArrowDown" || e.key === "PageDown") {
-      if (viewMode === "table") return;
+      if (modoVista === "tabla") return;
       e.preventDefault();
-      step(1);
+      avanzar(1);
     } else if (e.key === "ArrowUp" || e.key === "PageUp") {
-      if (viewMode === "table") return;
+      if (modoVista === "tabla") return;
       e.preventDefault();
-      step(-1);
+      avanzar(-1);
     } else if (e.key === "Home") {
-      if (viewMode === "table") return;
+      if (modoVista === "tabla") return;
       e.preventDefault();
-      goTo(0);
+      irA(0);
     } else if (e.key === "End") {
-      if (viewMode === "table") return;
+      if (modoVista === "tabla") return;
       e.preventDefault();
-      goTo(alumnos.length - 1);
+      irA(alumnos.length - 1);
     } else if (e.key === "Enter") {
-      if (viewMode === "table") return;
+      if (modoVista === "tabla") return;
       e.preventDefault();
-      openSheet();
+      abrirFicha();
     }
   });
 
-  els.menuToggle.addEventListener("click", toggleImportMenu);
-  els.importScrim.addEventListener("click", () => setImportMenuOpen(false));
+  dom.botonMenu.addEventListener("click", alternarMenuImportacion);
+  dom.fondoImport.addEventListener("click", () => establecerMenuImportacion(false));
 
-  let searchTimer;
-  els.searchInput.addEventListener("input", (e) => {
-    window.clearTimeout(searchTimer);
-    searchTimer = window.setTimeout(() => runSearch(e.target.value), 120);
+  let temporizadorBusqueda;
+  dom.entradaBusqueda.addEventListener("input", (e) => {
+    window.clearTimeout(temporizadorBusqueda);
+    temporizadorBusqueda = window.setTimeout(() => ejecutarBusqueda(e.target.value), 120);
   });
 
-  els.searchInput.addEventListener("blur", () => {
-    window.setTimeout(closeSearch, 150);
+  dom.entradaBusqueda.addEventListener("blur", () => {
+    window.setTimeout(cerrarBusqueda, 150);
   });
 
-  async function handleImportFile(file) {
+  // ── Importación de archivos ──────────────────────────────────────────────
+
+  /** Maneja la importación de un archivo (SQLite, Excel o CSV) */
+  async function manejarArchivoImportacion(file) {
     if (!file) return;
 
     const isSqlite = /\.(db|sqlite|sqlite3)$/i.test(file.name);
 
     try {
-      setStatus(`Leyendo ${file.name}…`);
+      establecerEstado(`Leyendo ${file.name}…`);
 
       if (isSqlite) {
-        if (!storeReady || !window.MdrStore) {
-          setStatus("SQLite aún no está listo");
+        if (!almacenListo || !window.MdrStore) {
+          establecerEstado("SQLite aún no está listo");
           return;
         }
         const bytes = new Uint8Array(await file.arrayBuffer());
-        /* Peek without losing current data until the user chooses a mode */
         const previous = alumnos.slice();
-        const list = window.MdrStore.importBytes(bytes);
+        const list = window.MdrStore.importarBytes(bytes);
         if (!list.length) {
-          /* restore previous sqlite state */
-          window.MdrStore.rebuildFromAlumnos(previous);
-          setStatus("El archivo .db no contiene fichas");
+          window.MdrStore.reconstruirDesdeAlumnos(previous);
+          establecerEstado("El archivo .db no contiene fichas");
           return;
         }
 
-        const mode = await askImportMode(list.length);
-        if (mode === "cancel") {
-          window.MdrStore.rebuildFromAlumnos(previous);
-          await window.MdrStore.persist();
-          setStatus("Importación cancelada");
+        const mode = await pedirModoImportacion(list.length);
+        if (mode === "cancelar") {
+          window.MdrStore.reconstruirDesdeAlumnos(previous);
+          await window.MdrStore.persistir();
+          establecerEstado("Importación cancelada");
           return;
         }
 
-        loadAlumnos(list, file.name, mode);
+        cargarAlumnos(list, file.name, mode);
         return;
       }
 
       if (typeof XLSX === "undefined") {
-        setStatus("SheetJS no cargó — revisa la red");
+        establecerEstado("SheetJS no cargó — revisa la red");
         return;
       }
 
@@ -1354,38 +1487,40 @@
       let parsed;
 
       if (isCsv) {
-        parsed = parseRawRows(await file.text(), true);
+        parsed = parsearFilasCrudas(await file.text(), true);
       } else {
-        parsed = parseRawRows(new Uint8Array(await file.arrayBuffer()), false);
+        parsed = parsearFilasCrudas(new Uint8Array(await file.arrayBuffer()), false);
       }
 
-      openImportMapper({ fileName: file.name, ...parsed });
+      abrirMapeadorImportacion({ fileName: file.name, ...parsed });
     } catch (err) {
       console.error(err);
-      setStatus("Error al importar el archivo");
+      establecerEstado("Error al importar el archivo");
     }
   }
 
-  els.excelInput.addEventListener("change", async (e) => {
+  dom.entradaExcel.addEventListener("change", async (e) => {
     const file = e.target.files && e.target.files[0];
-    await handleImportFile(file);
+    await manejarArchivoImportacion(file);
     e.target.value = "";
   });
 
-  els.exportDbBtn.addEventListener("click", downloadDbFile);
-  els.newFichaBtn.addEventListener("click", createNewFicha);
-  els.muteToggle.addEventListener("click", () => setSoundMuted(!soundMuted));
-  syncMuteUi();
-  if (els.viewToggle) {
-    els.viewToggle.addEventListener("click", () => {
-      setViewMode(viewMode === "table" ? "wheel" : "table");
+  dom.btnExportarDb.addEventListener("click", descargarArchivoDb);
+  dom.btnNuevaFicha.addEventListener("click", crearNuevaFicha);
+  dom.botonSilencio.addEventListener("click", () => establecerSonidoSilenciado(!sonidoSilenciado));
+  sincronizarUiSilencio();
+  if (dom.botonVista) {
+    dom.botonVista.addEventListener("click", () => {
+      establecerModoVista(modoVista === "tabla" ? "rueda" : "tabla");
     });
   }
-  if (els.wheelSort) {
-    els.wheelSort.addEventListener("click", toggleWheelSort);
+  if (dom.botonOrdenRueda) {
+    dom.botonOrdenRueda.addEventListener("click", alternarOrdenRueda);
   }
-  syncViewUi();
-  syncWheelSortUi();
+  sincronizarUiVista();
+  sincronizarUiOrdenRueda();
+
+  // ── Zona de arrastrar archivos (dropzone) ────────────────────────────────
 
   const dropzone = document.getElementById("dropzone");
   if (dropzone) {
@@ -1405,81 +1540,87 @@
     });
     dropzone.addEventListener("drop", async (e) => {
       const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      await handleImportFile(file);
+      await manejarArchivoImportacion(file);
     });
   }
 
-  els.importCancel.addEventListener("click", closeImportMapper);
-  els.importConfirm.addEventListener("click", () => {
-    applyImportMapping();
+  // ── Botones de modales ───────────────────────────────────────────────────
+
+  dom.btnCancelarImport.addEventListener("click", cerrarMapeadorImportacion);
+  dom.btnConfirmarImport.addEventListener("click", () => {
+    aplicarMapeoImportacion();
   });
 
-  els.importModeReplace.addEventListener("click", () => resolveImportMode("replace"));
-  els.importModeAppend.addEventListener("click", () => resolveImportMode("append"));
-  els.importModeCancel.addEventListener("click", () => resolveImportMode("cancel"));
-  els.importModeOverlay.addEventListener("click", (e) => {
-    if (e.target === els.importModeOverlay) resolveImportMode("cancel");
+  dom.btnReemplazar.addEventListener("click", () => completarModoImportacion("reemplazar"));
+  dom.btnAnadir.addEventListener("click", () => completarModoImportacion("anadir"));
+  dom.btnCancelarModo.addEventListener("click", () => completarModoImportacion("cancelar"));
+  dom.overlayModo.addEventListener("click", (e) => {
+    if (e.target === dom.overlayModo) completarModoImportacion("cancelar");
   });
 
-  els.importOverlay.addEventListener("click", (e) => {
-    if (e.target === els.importOverlay) closeImportMapper();
+  dom.overlayImportacion.addEventListener("click", (e) => {
+    if (e.target === dom.overlayImportacion) cerrarMapeadorImportacion();
   });
 
-  els.sheetClose.addEventListener("click", closeSheet);
-  els.sheetEdit.addEventListener("click", () => {
-    sheetEditing = true;
-    renderSheet();
+  dom.btnCerrar.addEventListener("click", cerrarFicha);
+  dom.btnEditar.addEventListener("click", () => {
+    editandoFicha = true;
+    renderizarFicha();
   });
-  els.sheetCancelEdit.addEventListener("click", () => {
-    if (isDraftNew) {
-      closeSheet();
+  dom.btnCancelarEdicion.addEventListener("click", () => {
+    if (esBorradorNuevo) {
+      cerrarFicha();
       return;
     }
-    sheetEditing = false;
-    renderSheet();
+    editandoFicha = false;
+    renderizarFicha();
   });
-  els.sheetSave.addEventListener("click", (e) => {
+  dom.btnGuardar.addEventListener("click", (e) => {
     e.preventDefault();
-    saveSheet();
+    guardarFicha();
   });
-  els.sheetDelete.addEventListener("click", deleteCurrentFicha);
-  els.sheetForm.addEventListener("submit", (e) => {
+  dom.btnEliminar.addEventListener("click", eliminarFichaActual);
+  dom.formularioFicha.addEventListener("submit", (e) => {
     e.preventDefault();
-    saveSheet();
+    guardarFicha();
   });
 
-  const telefonoInput = els.sheetForm.querySelector('[name="telefono"]');
+  // ── Validación del campo teléfono (solo dígitos) ─────────────────────────
+
+  const telefonoInput = dom.formularioFicha.querySelector('[name="telefono"]');
   if (telefonoInput) {
     telefonoInput.addEventListener("input", () => {
-      const cleaned = digitsOnly(telefonoInput.value);
+      const cleaned = soloDigitos(telefonoInput.value);
       if (telefonoInput.value !== cleaned) telefonoInput.value = cleaned;
     });
     telefonoInput.addEventListener("paste", (e) => {
       e.preventDefault();
       const text = (e.clipboardData || window.clipboardData).getData("text");
-      const digits = digitsOnly(text);
+      const digits = soloDigitos(text);
       const start = telefonoInput.selectionStart ?? telefonoInput.value.length;
       const end = telefonoInput.selectionEnd ?? telefonoInput.value.length;
-      const next = digitsOnly(
+      const next = soloDigitos(
         telefonoInput.value.slice(0, start) + digits + telefonoInput.value.slice(end)
       );
       telefonoInput.value = next.slice(0, telefonoInput.maxLength || 15);
     });
   }
 
-  els.sheetOverlay.addEventListener("click", (e) => {
-    if (e.target === els.sheetOverlay && !sheetEditing && !isDraftNew) closeSheet();
+  dom.overlayFicha.addEventListener("click", (e) => {
+    if (e.target === dom.overlayFicha && !editandoFicha && !esBorradorNuevo) cerrarFicha();
   });
+
+  // ── Inicialización del contexto de audio al primer gesto del usuario ─────
 
   ["pointerdown", "keydown"].forEach((evt) => {
     document.addEventListener(
       evt,
       () => {
-        if (!audioCtx) {
+        if (!contextoAudio) {
           try {
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            contextoAudio = new (window.AudioContext || window.webkitAudioContext)();
           } catch {
-            /* ignore */
+            /* ignorar */
           }
         }
       },
@@ -1487,37 +1628,41 @@
     );
   });
 
-  renderCards();
-  setImportMenuOpen(false);
-  setStatus("Cargando base SQLite…");
+  // ══════════════════════════════════════════════════════════════════════════
+  // ARRANQUE INICIAL
+  // ══════════════════════════════════════════════════════════════════════════
 
-  (async function bootStore() {
+  renderizarFichas();
+  establecerMenuImportacion(false);
+  establecerEstado("Cargando base SQLite…");
+
+  (async function arrancarAlmacen() {
     try {
       if (!window.MdrStore || typeof initSqlJs !== "function") {
-        setStatus("No se pudo cargar SQLite (revisa la red)");
+        establecerEstado("No se pudo cargar SQLite (revisa la red)");
         return;
       }
 
-      const legacy = readLegacyLocalStorage();
-      const seed = legacy && legacy.length ? legacy : DEFAULT_ALUMNOS.map((a) => ({ ...a }));
-      const { alumnos: loaded, source } = await window.MdrStore.init(seed);
+      const legacy = leerAlmacenamientoLegado();
+      const seed = legacy && legacy.length ? legacy : ALUMNOS_POR_DEFECTO.map((a) => ({ ...a }));
+      const { alumnos: loaded, source } = await window.MdrStore.iniciar(seed);
       alumnos = loaded.length ? loaded : seed;
-      storeReady = true;
-      spinIndex = 0;
-      refreshViews();
+      almacenListo = true;
+      indiceGiro = 0;
+      actualizarVistas();
 
       if (source === "seed" && legacy && legacy.length) {
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-        setStatus(`${alumnos.length} fichas · migradas a SQLite`);
+        localStorage.removeItem(CLAVE_ALMACEN_LEGACY);
+        establecerEstado(`${alumnos.length} fichas · migradas a SQLite`);
       } else if (source === "sqlite") {
-        setStatus(`${alumnos.length} fichas · SQLite`);
+        establecerEstado(`${alumnos.length} fichas · SQLite`);
       } else {
-        setStatus(`${alumnos.length} fichas · SQLite lista`);
+        establecerEstado(`${alumnos.length} fichas · SQLite lista`);
       }
     } catch (err) {
       console.error(err);
-      storeReady = false;
-      setStatus("Error al iniciar SQLite");
+      almacenListo = false;
+      establecerEstado("Error al iniciar SQLite");
     }
   })();
 })();

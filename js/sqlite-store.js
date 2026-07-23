@@ -1,16 +1,32 @@
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * sqlite-store.js — Capa de persistencia SQLite (sql.js + IndexedDB)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Gestiona la base de datos SQLite en memoria y la almacena en IndexedDB.
+ * Expone la API global window.MdrStore con métodos para iniciar, leer,
+ * reconstruir, persistir, exportar e importar la base de datos.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 (() => {
   "use strict";
 
-  const SQL_CDN = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/";
+  // ── Constantes de configuración ──────────────────────────────────────────
+
+  const CDN_SQL = "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/";
   const IDB_NAME = "mdr-sqlite-v1";
   const IDB_STORE = "databases";
   const IDB_KEY = "mdr.db";
-  const CORE_COLUMNS = ["nombre", "instrumento", "curso", "direccion", "telefono", "email", "notas"];
+  const COLUMNAS_NUCLEO = ["nombre", "instrumento", "curso", "direccion", "telefono", "email", "notas"];
+
+  // ── Estado interno ───────────────────────────────────────────────────────
 
   let SQL = null;
   let db = null;
 
-  function openIdb() {
+  // ── Acceso a IndexedDB ───────────────────────────────────────────────────
+
+  /** Abre (o crea) la base IndexedDB donde se almacena el archivo .db */
+  function abrirIdb() {
     return new Promise((resolve, reject) => {
       const req = indexedDB.open(IDB_NAME, 1);
       req.onupgradeneeded = () => {
@@ -24,8 +40,9 @@
     });
   }
 
-  async function idbGet() {
-    const idb = await openIdb();
+  /** Obtiene los bytes de la base almacenada en IndexedDB */
+  async function idbObtener() {
+    const idb = await abrirIdb();
     return new Promise((resolve, reject) => {
       const tx = idb.transaction(IDB_STORE, "readonly");
       const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
@@ -34,8 +51,9 @@
     });
   }
 
-  async function idbSet(bytes) {
-    const idb = await openIdb();
+  /** Guarda bytes en IndexedDB */
+  async function idbGuardar(bytes) {
+    const idb = await abrirIdb();
     return new Promise((resolve, reject) => {
       const tx = idb.transaction(IDB_STORE, "readwrite");
       tx.objectStore(IDB_STORE).put(bytes, IDB_KEY);
@@ -44,7 +62,10 @@
     });
   }
 
-  function tableColumns(database, table) {
+  // ── Utilidades de esquema ────────────────────────────────────────────────
+
+  /** Devuelve la lista de columnas de una tabla */
+  function columnasTabla(database, table) {
     try {
       const info = database.exec(`PRAGMA table_info(${table})`);
       if (!info.length) return [];
@@ -55,7 +76,8 @@
     }
   }
 
-  function ensureSchema(database) {
+  /** Crea las tablas necesarias y añade columnas faltantes */
+  function asegurarEsquema(database) {
     database.run(`
       CREATE TABLE IF NOT EXISTS alumnos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,42 +98,47 @@
       );
     `);
 
-    const cols = new Set(tableColumns(database, "alumnos"));
+    const cols = new Set(columnasTabla(database, "alumnos"));
     if (cols.size === 0) return;
     for (const col of ["direccion", "instrumento", "curso", "telefono", "email", "notas", "extras"]) {
       if (!cols.has(col)) {
         try {
           database.run(`ALTER TABLE alumnos ADD COLUMN ${col} TEXT`);
         } catch {
-          /* column may already exist */
+          /* la columna puede ya existir */
         }
       }
     }
   }
 
-  function createEmptyDb() {
+  /** Crea una base SQLite vacía con el esquema base y metadatos iniciales */
+  function crearBaseVacia() {
     const database = new SQL.Database();
-    ensureSchema(database);
+    asegurarEsquema(database);
     database.run("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["app", "MDR"]);
     database.run("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["version", "1"]);
     return database;
   }
 
-  function alumnoToExtras(alumno) {
+  // ── Conversión alumno ↔ fila SQL ────────────────────────────────────────
+
+  /** Extrae campos no-núcleo de un alumno y los serializa como JSON */
+  function alumnoAExtras(alumno) {
     const extras = {};
     for (const [k, v] of Object.entries(alumno || {})) {
-      if (CORE_COLUMNS.includes(k) || k === "id") continue;
+      if (COLUMNAS_NUCLEO.includes(k) || k === "id") continue;
       if (v == null || String(v).trim() === "") continue;
       extras[k] = String(v).trim();
     }
     return JSON.stringify(extras);
   }
 
-  function rowToAlumno(row) {
+  /** Convierte una fila SQL en un objeto alumno limpio */
+  function filaAAlumno(row) {
     const out = {
       nombre: row.nombre || "Sin nombre",
     };
-    for (const key of CORE_COLUMNS) {
+    for (const key of COLUMNAS_NUCLEO) {
       if (key === "nombre") continue;
       if (row[key] != null && String(row[key]).trim() !== "") out[key] = String(row[key]).trim();
     }
@@ -123,12 +150,15 @@
         }
       }
     } catch {
-      /* ignore bad extras */
+      /* extras malformados — se ignoran */
     }
     return out;
   }
 
-  function readAlumnos(database = db) {
+  // ── Operaciones principales ──────────────────────────────────────────────
+
+  /** Lee todos los alumnos de la tabla ordenados por id */
+  function leerAlumnos(database = db) {
     if (!database) return [];
     const result = database.exec(
       "SELECT nombre, instrumento, curso, direccion, telefono, email, notas, extras FROM alumnos ORDER BY id ASC"
@@ -140,17 +170,18 @@
       columns.forEach((col, i) => {
         row[col] = vals[i];
       });
-      return rowToAlumno(row);
+      return filaAAlumno(row);
     });
   }
 
-  function rebuildFromAlumnos(alumnos) {
+  /** Reconstruye la base completa a partir de un array de alumnos */
+  function reconstruirDesdeAlumnos(alumnos) {
     if (!SQL) throw new Error("SQLite no inicializado");
     if (db) {
       db.close();
       db = null;
     }
-    db = createEmptyDb();
+    db = crearBaseVacia();
     for (const alumno of alumnos) {
       db.run(
         `INSERT INTO alumnos (nombre, instrumento, curso, direccion, telefono, email, notas, extras)
@@ -163,64 +194,74 @@
           alumno.telefono || null,
           alumno.email || null,
           alumno.notas || null,
-          alumnoToExtras(alumno),
+          alumnoAExtras(alumno),
         ]
       );
     }
   }
 
-  async function persist() {
+  /** Persiste la base en memoria a IndexedDB */
+  async function persistir() {
     if (!db) return false;
     const data = db.export();
-    await idbSet(data);
+    await idbGuardar(data);
     return true;
   }
 
-  function exportBytes() {
+  /** Exporta la base como Uint8Array (para descarga .db) */
+  function exportarBytes() {
     if (!db) throw new Error("No hay base de datos");
     return db.export();
   }
 
-  function importBytes(uint8) {
+  /** Importa bytes de un archivo .db externo y devuelve los alumnos */
+  function importarBytes(uint8) {
     if (!SQL) throw new Error("SQLite no inicializado");
     if (db) {
       db.close();
       db = null;
     }
     db = new SQL.Database(uint8);
-    ensureSchema(db);
-    return readAlumnos(db);
+    asegurarEsquema(db);
+    return leerAlumnos(db);
   }
 
-  async function init(seedAlumnos) {
+  // ── Inicialización ───────────────────────────────────────────────────────
+
+  /**
+   * Inicializa sql.js, carga la base desde IndexedDB o crea una nueva
+   * con los alumnos semilla proporcionados.
+   */
+  async function iniciar(seedAlumnos) {
     SQL = await initSqlJs({
-      locateFile: (file) => SQL_CDN + file,
+      locateFile: (file) => CDN_SQL + file,
     });
 
-    const saved = await idbGet();
+    const saved = await idbObtener();
     if (saved && saved.length) {
       db = new SQL.Database(saved);
-      ensureSchema(db);
-      const list = readAlumnos(db);
+      asegurarEsquema(db);
+      const list = leerAlumnos(db);
       if (list.length) {
-        /* rewrite once so new columns like direccion are persisted */
-        rebuildFromAlumnos(list);
-        await persist();
+        reconstruirDesdeAlumnos(list);
+        await persistir();
         return { alumnos: list, source: "sqlite" };
       }
     }
 
-    rebuildFromAlumnos(seedAlumnos || []);
-    await persist();
-    return { alumnos: readAlumnos(), source: "seed" };
+    reconstruirDesdeAlumnos(seedAlumnos || []);
+    await persistir();
+    return { alumnos: leerAlumnos(), source: "seed" };
   }
 
+  // ── API pública ──────────────────────────────────────────────────────────
+
   window.MdrStore = {
-    init,
-    readAlumnos,
-    rebuildFromAlumnos,
-    persist,
-    exportBytes,
-    importBytes,
+    iniciar,
+    leerAlumnos,
+    reconstruirDesdeAlumnos,
+    persistir,
+    exportarBytes,
+    importarBytes,
   };
 })();
