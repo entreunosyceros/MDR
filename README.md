@@ -74,6 +74,8 @@ En el menú hamburguesa: arrastra el archivo o selecciónalo. Si ya hay datos, p
 
 ## Campos de una ficha
 
+<img width="1916" height="930" alt="Peek 2026-07-23 17-40" src="https://github.com/user-attachments/assets/1a8f5ef4-6d42-418e-9cbc-ad5fe7181140" />
+
 | Campo | Descripción |
 |-------|-------------|
 | `nombre` | Obligatorio |
