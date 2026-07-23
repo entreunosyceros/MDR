@@ -6,6 +6,10 @@ Fichero digital estilo **Rolodex** para gestionar alumnos de una escuela de mús
 
 ## Características
 
+<p align="center">
+<img width="1916" height="930" alt="Peek 2026-07-23 17-37" src="https://github.com/user-attachments/assets/64ea4364-e86a-4c1c-b781-57f4de8e66d6" />
+</p>
+
 - **Rueda 3D**: navega con la rueda del ratón o las flechas; clic (o Enter) para abrir la ficha
 - **Vista tabla**: fichas agrupadas por curso (máx. 4 por fila), con scroll vertical
 - **Arrastrar entre cursos**: en la vista tabla, mueve una ficha a otro curso y se actualiza solo
