@@ -10,7 +10,7 @@ Repositorio: [github.com/entreunosyceros/MDR](https://github.com/entreunosyceros
 
 ## Características
 
-<img width="1916" height="930" alt="Peek 2026-07-23 17-37" src="https://github.com/user-attachments/assets/64ea4364-e86a-4c1c-b781-57f4de8e66d6" />
+<img width="1916" height="930" alt="Peek 2026-07-24 15-58" src="https://github.com/user-attachments/assets/c8bd9c0f-d24d-44ef-831d-9bce0f2dbdb2" />
 
 ### Rueda 3D
 - Navegación con rueda del ratón, flechas ↑↓ o **arrastre vertical** (arriba/abajo)
