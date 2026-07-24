@@ -94,6 +94,8 @@ MDR/
 
 ## Datos de ejemplo
 
+<img width="1916" height="930" alt="Peek 2026-07-24 16-03" src="https://github.com/user-attachments/assets/bfa0e664-3fd7-477f-9565-91b5931071eb" />
+
 | Archivo | Uso |
 |---------|-----|
 | `datos-ejemplo.csv` | Importar desde el menú (Excel/CSV) |
