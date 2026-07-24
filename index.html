@@ -76,7 +76,7 @@
           <button type="button" class="btn btn--solid new-ficha-btn" id="newFichaBtn">
             + Nueva ficha
           </button>
-          <p class="hint" id="statusHint">Gira con la rueda · clic para abrir</p>
+          <p class="hint" id="statusHint">Gira con la rueda o arrastrando · clic para abrir</p>
         </div>
 
         <div class="import-tray__head">
@@ -101,6 +101,17 @@
       </aside>
 
       <main class="stage" id="stage" tabindex="0" aria-label="Tarjetero MDR">
+        <button
+          type="button"
+          class="wheel-sort"
+          id="wheelSort"
+          data-dir="1"
+          title="Orden alfabético A → Z (clic para invertir)"
+          aria-label="Ordenar rueda por nombre. Ahora A → Z"
+        >
+          A → Z
+        </button>
+
         <div class="housing" aria-hidden="true">
           <div class="housing-rim housing-rim--top"></div>
           <div class="housing-body"></div>
@@ -111,16 +122,6 @@
         <div class="rolodex" id="rolodex"></div>
 
         <div class="stage-tools">
-          <button
-            type="button"
-            class="wheel-sort"
-            id="wheelSort"
-            data-dir="1"
-            title="Orden alfabético A → Z (clic para invertir)"
-            aria-label="Ordenar rueda por nombre. Ahora A → Z"
-          >
-            A → Z
-          </button>
           <div class="counter" id="counter" aria-live="polite"></div>
         </div>
       </main>
@@ -134,6 +135,13 @@
       <span>SQLite · Excel · CSV</span>
       <span class="sep">·</span>
       <span>Flechas ↑↓ navegan · Enter abre ficha</span>
+      <span class="sep">·</span>
+      <a
+        class="foot__link"
+        href="https://github.com/entreunosyceros/MDR"
+        target="_blank"
+        rel="noopener noreferrer"
+      >GitHub</a>
     </footer>
   </div>
 
@@ -204,60 +212,104 @@
     </div>
   </div>
 
-  <!-- Ficha abierta -->
-  <div class="overlay" id="sheetOverlay" hidden>
+  <!-- Resolución de nombres duplicados al añadir -->
+  <div class="overlay" id="dupOverlay" hidden>
+    <div class="panel panel--dup" role="dialog" aria-modal="true" aria-labelledby="dupTitle">
+      <header class="panel-head">
+        <h2 id="dupTitle">Nombre duplicado</h2>
+        <p class="panel-sub" id="dupSubtitle">Ya existe una ficha con ese nombre</p>
+      </header>
+
+      <div class="dup-compare" id="dupCompare"></div>
+
+      <label class="dup-rename">
+        <span>Nombre si creas una ficha nueva</span>
+        <input type="text" id="dupNewName" autocomplete="off" />
+      </label>
+      <p class="dup-error" id="dupError" hidden></p>
+
+      <div class="mode-actions">
+        <button type="button" class="btn btn--solid" id="dupOverwrite" data-dup-action="sobreescribir">Sobrescribir la existente</button>
+        <button type="button" class="btn btn--ghost" id="dupOmit" data-dup-action="omitir">Omitir la nueva</button>
+        <button type="button" class="btn btn--ghost" id="dupCreate" data-dup-action="crear">Crear como nueva</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ficha abierta: misma tarjeta del Rolodex en zoom -->
+  <div class="overlay overlay--sheet" id="sheetOverlay" hidden>
     <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheetDialogTitle">
-      <div class="sheet-toolbar">
+      <header class="sheet-head">
         <span class="sheet-num" id="sheetNum"></span>
-        <div class="sheet-actions">
-          <button type="button" class="btn btn--ghost" id="sheetEdit" hidden>Editar</button>
-          <button type="button" class="btn btn--ghost" id="sheetCancelEdit" hidden>Descartar</button>
-          <button type="button" class="btn btn--solid" id="sheetSave" hidden>Guardar</button>
-          <button type="button" class="btn btn--danger" id="sheetDelete" hidden>Eliminar</button>
-          <button type="button" class="btn btn--ghost" id="sheetClose" aria-label="Cerrar">Cerrar</button>
-        </div>
+        <button type="button" class="sheet-close" id="sheetClose" aria-label="Cerrar ficha" title="Cerrar">
+          <span aria-hidden="true">×</span>
+        </button>
+      </header>
+
+      <div class="sheet-body">
+        <div id="sheetView" class="sheet-view"></div>
+
+        <form id="sheetForm" class="sheet-form" hidden>
+          <label>
+            <span>Nombre</span>
+            <input name="nombre" type="text" autocomplete="off" required />
+          </label>
+          <label>
+            <span>Instrumento</span>
+            <input name="instrumento" type="text" autocomplete="off" />
+          </label>
+          <label>
+            <span>Curso</span>
+            <select name="curso" id="sheetCurso" class="sheet-input">
+              <option value="">Sin curso</option>
+              <option value="1º Grado">1º Grado</option>
+              <option value="2º Grado">2º Grado</option>
+              <option value="3º Grado">3º Grado</option>
+              <option value="4º Grado">4º Grado</option>
+            </select>
+          </label>
+          <label class="full">
+            <span>Dirección</span>
+            <input name="direccion" type="text" autocomplete="street-address" />
+          </label>
+          <label>
+            <span>Teléfono</span>
+            <input
+              name="telefono"
+              type="tel"
+              inputmode="numeric"
+              pattern="[0-9]*"
+              autocomplete="tel"
+              maxlength="15"
+            />
+          </label>
+          <label>
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="off" />
+          </label>
+          <label class="full">
+            <span>Notas</span>
+            <textarea name="notas" rows="3"></textarea>
+          </label>
+          <div class="sheet-extras full">
+            <p class="sheet-extras__label">Campos de esta ficha</p>
+            <div id="sheetExtraFields" class="extra-fields"></div>
+            <button type="button" class="btn btn--ghost sheet-add-field" id="sheetAddField">
+              + Añadir campo
+            </button>
+          </div>
+        </form>
       </div>
 
-      <div id="sheetView" class="sheet-view"></div>
-
-      <form id="sheetForm" class="sheet-form" hidden>
-        <label>
-          <span>Nombre</span>
-          <input name="nombre" type="text" autocomplete="off" required />
-        </label>
-        <label>
-          <span>Instrumento</span>
-          <input name="instrumento" type="text" autocomplete="off" />
-        </label>
-        <label>
-          <span>Curso</span>
-          <input name="curso" type="text" autocomplete="off" />
-        </label>
-        <label class="full">
-          <span>Dirección</span>
-          <input name="direccion" type="text" autocomplete="street-address" />
-        </label>
-        <label>
-          <span>Teléfono</span>
-          <input
-            name="telefono"
-            type="tel"
-            inputmode="numeric"
-            pattern="[0-9]*"
-            autocomplete="tel"
-            maxlength="15"
-          />
-        </label>
-        <label>
-          <span>Email</span>
-          <input name="email" type="email" autocomplete="off" />
-        </label>
-        <label class="full">
-          <span>Notas</span>
-          <textarea name="notas" rows="3"></textarea>
-        </label>
-        <div id="sheetExtraFields" class="extra-fields full"></div>
-      </form>
+      <footer class="sheet-footer">
+        <div class="sheet-actions">
+          <button type="button" class="btn btn--ghost sheet-key" id="sheetEdit" hidden>Editar</button>
+          <button type="button" class="btn btn--ghost sheet-key" id="sheetCancelEdit" hidden>Descartar</button>
+          <button type="button" class="btn btn--solid sheet-key" id="sheetSave" hidden>Guardar</button>
+          <button type="button" class="btn btn--ghost sheet-key" id="sheetPrint" hidden>Imprimir</button>
+          <button type="button" class="btn btn--danger sheet-key" id="sheetDelete" hidden>Eliminar</button>
+        </div>
+      </footer>
     </div>
   </div>
 

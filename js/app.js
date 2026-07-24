@@ -84,6 +84,14 @@
     btnReemplazar: document.getElementById("importModeReplace"),
     btnAnadir: document.getElementById("importModeAppend"),
     btnCancelarModo: document.getElementById("importModeCancel"),
+    overlayDuplicado: document.getElementById("dupOverlay"),
+    subtituloDuplicado: document.getElementById("dupSubtitle"),
+    comparacionDuplicado: document.getElementById("dupCompare"),
+    entradaNombreDuplicado: document.getElementById("dupNewName"),
+    errorDuplicado: document.getElementById("dupError"),
+    btnSobrescribirDup: document.getElementById("dupOverwrite"),
+    btnOmitirDup: document.getElementById("dupOmit"),
+    btnCrearDup: document.getElementById("dupCreate"),
     overlayFicha: document.getElementById("sheetOverlay"),
     numFicha: document.getElementById("sheetNum"),
     vistaFicha: document.getElementById("sheetView"),
@@ -91,9 +99,11 @@
     btnEditar: document.getElementById("sheetEdit"),
     btnCancelarEdicion: document.getElementById("sheetCancelEdit"),
     btnGuardar: document.getElementById("sheetSave"),
+    btnImprimir: document.getElementById("sheetPrint"),
     btnEliminar: document.getElementById("sheetDelete"),
     btnCerrar: document.getElementById("sheetClose"),
     camposExtra: document.getElementById("sheetExtraFields"),
+    btnAnadirCampo: document.getElementById("sheetAddField"),
     botonMenu: document.getElementById("menuToggle"),
     bandejaImport: document.getElementById("importTray"),
     fondoImport: document.getElementById("importScrim"),
@@ -128,6 +138,10 @@
   let esBorradorNuevo = false;
   let almacenListo = false;
   let resolverModoImportacion = null;
+  let resolverDuplicado = null;
+  /** Nombres ya aceptados en el lote actual de importación (para validar “crear”) */
+  let nombresLoteDuplicado = [];
+  let progresoDuplicado = { actual: 0, total: 0 };
 
   // ══════════════════════════════════════════════════════════════════════════
   // PERSISTENCIA Y ALMACENAMIENTO
@@ -311,7 +325,8 @@
     return (
       !dom.overlayImportacion.hidden ||
       !dom.overlayFicha.hidden ||
-      !dom.overlayModo.hidden
+      !dom.overlayModo.hidden ||
+      (dom.overlayDuplicado && !dom.overlayDuplicado.hidden)
     );
   }
 
@@ -549,17 +564,13 @@
     card.draggable = true;
 
     card.addEventListener("dragstart", (e) => {
-      if (e.target.closest("a.card-mail")) {
-        e.preventDefault();
-        return;
-      }
       indiceArrastreTabla = index;
       suprimirClicFichaTabla = false;
       card.classList.add("is-dragging");
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", String(index));
       try {
-        e.dataTransfer.setDragImage(card, card.offsetWidth / 2, 24);
+        e.dataTransfer.setDragImage(card, card.offsetWidth / 2, 18);
       } catch {
         /* ignorar */
       }
@@ -578,6 +589,18 @@
       }
       indiceArrastreTabla = null;
     });
+  }
+
+  /** HTML de ficha en el clasificador (nombre legible + datos clave) */
+  function htmlFichaTabla(alumno, index) {
+    const tel = alumno.telefono ? escaparHtml(alumno.telefono) : "";
+    return `
+      <span class="table-card__grip" aria-hidden="true"></span>
+      <span class="table-card__index">N.º ${String(index + 1).padStart(3, "0")}</span>
+      <strong class="table-card__name">${escaparHtml(alumno.nombre || "Sin nombre")}</strong>
+      <span class="table-card__instrument">${escaparHtml(alumno.instrumento || "—")}</span>
+      ${tel ? `<span class="table-card__meta">${tel}</span>` : ""}
+    `;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -600,16 +623,30 @@
     const groups = agruparAlumnosPorCurso();
     dom.contenidoTabla.innerHTML = "";
 
+    const intro = document.createElement("p");
+    intro.className = "table-view__legend";
+    intro.textContent = "Clasificador por curso · arrastra fichas entre cajones";
+    dom.contenidoTabla.appendChild(intro);
+
     groups.forEach(({ curso, rows, sortDir }) => {
       const block = document.createElement("section");
       block.className = "course-block";
+      block.setAttribute("aria-label", `Cajón ${curso}`);
 
       const head = document.createElement("div");
       head.className = "course-block__head";
 
       const title = document.createElement("h2");
       title.className = "course-block__title";
-      title.textContent = curso;
+      title.innerHTML = `<span class="course-block__tag">[ ${escaparHtml(curso)} ]</span>`;
+
+      const rail = document.createElement("span");
+      rail.className = "course-block__rail";
+      rail.setAttribute("aria-hidden", "true");
+
+      const meta = document.createElement("p");
+      meta.className = "course-block__meta";
+      meta.textContent = `( ${rows.length} ${rows.length === 1 ? "alumno" : "alumnos"} )`;
 
       const sortBtn = document.createElement("button");
       sortBtn.type = "button";
@@ -635,19 +672,14 @@
         );
       });
 
-      head.appendChild(title);
-      head.appendChild(sortBtn);
-
-      const meta = document.createElement("p");
-      meta.className = "course-block__meta";
-      meta.textContent = `${rows.length} ${rows.length === 1 ? "alumno" : "alumnos"}`;
+      head.append(title, rail, meta, sortBtn);
 
       const grid = document.createElement("div");
       grid.className = "course-grid";
 
       rows.forEach(({ alumno, index }) => {
         const card = document.createElement("article");
-        card.className = "card table-card";
+        card.className = "table-card";
         card.dataset.index = String(index);
         card.tabIndex = 0;
         card.setAttribute("role", "button");
@@ -655,10 +687,11 @@
           "aria-label",
           `Abrir ficha de ${alumno.nombre || "sin nombre"}. Arrastra para cambiar de curso`
         );
-        card.innerHTML = htmlFicha(alumno, index);
+        card.title = "Arrastra para cambiar de curso · clic para abrir";
+        card.innerHTML = htmlFichaTabla(alumno, index);
 
-        card.addEventListener("click", (e) => {
-          if (suprimirClicFichaTabla || e.target.closest("a.card-mail")) return;
+        card.addEventListener("click", () => {
+          if (suprimirClicFichaTabla) return;
           abrirFicha(index);
         });
         card.addEventListener("keydown", (e) => {
@@ -674,7 +707,6 @@
 
       vincularZonaSoltarCurso(block, curso);
       block.appendChild(head);
-      block.appendChild(meta);
       block.appendChild(grid);
       dom.contenidoTabla.appendChild(block);
     });
@@ -687,27 +719,68 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SONIDO DE CLIC
+  // SONIDO DE LA RUEDA (cartulina / plástico de Rolodex)
   // ══════════════════════════════════════════════════════════════════════════
 
-  /** Reproduce un breve sonido de clic mecánico */
+  /** Buffer corto de ruido blanco reutilizable para el “flap” de papel */
+  let bufferRuidoRueda = null;
+
+  function obtenerBufferRuido() {
+    if (bufferRuidoRueda) return bufferRuidoRueda;
+    const ctx = contextoAudio;
+    const n = Math.floor(ctx.sampleRate * 0.04);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    }
+    bufferRuidoRueda = buf;
+    return buf;
+  }
+
+  /**
+   * Sonido al pasar una ficha: golpe suave de plástico + roce breve de cartulina.
+   * (no es el “blip” electrónico anterior)
+   */
   function reproducirClic() {
     if (sonidoSilenciado) return;
     try {
       if (!contextoAudio) contextoAudio = new (window.AudioContext || window.webkitAudioContext)();
       if (contextoAudio.state === "suspended") contextoAudio.resume().catch(() => {});
       const t = contextoAudio.currentTime;
-      const osc = contextoAudio.createOscillator();
-      const gain = contextoAudio.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(320, t);
-      osc.frequency.exponentialRampToValueAtTime(40, t + 0.05);
-      gain.gain.setValueAtTime(0.06, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
-      osc.connect(gain);
-      gain.connect(contextoAudio.destination);
-      osc.start(t);
-      osc.stop(t + 0.08);
+
+      /* Golpe bajo del eje / plástico */
+      const thud = contextoAudio.createOscillator();
+      const thudGain = contextoAudio.createGain();
+      const thudFilter = contextoAudio.createBiquadFilter();
+      thud.type = "triangle";
+      thud.frequency.setValueAtTime(110, t);
+      thud.frequency.exponentialRampToValueAtTime(48, t + 0.06);
+      thudFilter.type = "lowpass";
+      thudFilter.frequency.setValueAtTime(420, t);
+      thudGain.gain.setValueAtTime(0.045, t);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+      thud.connect(thudFilter);
+      thudFilter.connect(thudGain);
+      thudGain.connect(contextoAudio.destination);
+      thud.start(t);
+      thud.stop(t + 0.09);
+
+      /* Roce corto de cartulina */
+      const noise = contextoAudio.createBufferSource();
+      noise.buffer = obtenerBufferRuido();
+      const noiseFilter = contextoAudio.createBiquadFilter();
+      const noiseGain = contextoAudio.createGain();
+      noiseFilter.type = "bandpass";
+      noiseFilter.frequency.setValueAtTime(1400, t);
+      noiseFilter.Q.setValueAtTime(0.7, t);
+      noiseGain.gain.setValueAtTime(0.028, t);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
+      noise.connect(noiseFilter);
+      noiseFilter.connect(noiseGain);
+      noiseGain.connect(contextoAudio.destination);
+      noise.start(t);
+      noise.stop(t + 0.05);
     } catch {
       /* ignorar */
     }
@@ -722,6 +795,104 @@
     return Object.entries(alumno || {}).filter(
       ([k, v]) => !CLAVES_NUCLEO.has(k) && v != null && String(v).trim() !== ""
     );
+  }
+
+  /** Normaliza el nombre de un campo personalizado */
+  function normalizarNombreCampo(raw) {
+    return String(raw || "")
+      .trim()
+      .replace(/\s+/g, " ");
+  }
+
+  /**
+   * Crea una fila editable de campo personalizado (solo esta ficha).
+   * @returns {HTMLElement}
+   */
+  function crearFilaCampoExtra(key = "", value = "") {
+    const row = document.createElement("div");
+    row.className = "extra-field-row";
+
+    const labelKey = document.createElement("label");
+    labelKey.className = "extra-field-row__key";
+    const capKey = document.createElement("span");
+    capKey.textContent = "Campo";
+    const inputKey = document.createElement("input");
+    inputKey.type = "text";
+    inputKey.className = "extra-field-key";
+    inputKey.autocomplete = "off";
+    inputKey.placeholder = "p. ej. Tutor";
+    inputKey.value = key;
+
+    const labelVal = document.createElement("label");
+    labelVal.className = "extra-field-row__val";
+    const capVal = document.createElement("span");
+    capVal.textContent = "Valor";
+    const inputVal = document.createElement("input");
+    inputVal.type = "text";
+    inputVal.className = "extra-field-val";
+    inputVal.autocomplete = "off";
+    inputVal.placeholder = "p. ej. Perico Pérez";
+    inputVal.value = value ?? "";
+
+    const btnRemove = document.createElement("button");
+    btnRemove.type = "button";
+    btnRemove.className = "extra-field-remove";
+    btnRemove.setAttribute("aria-label", "Eliminar este campo de la ficha");
+    btnRemove.title = "Eliminar campo";
+    btnRemove.textContent = "×";
+    btnRemove.addEventListener("click", () => {
+      row.remove();
+      establecerEstado("Campo quitado de esta ficha · guarda para confirmar");
+    });
+
+    labelKey.append(capKey, inputKey);
+    labelVal.append(capVal, inputVal);
+    row.append(labelKey, labelVal, btnRemove);
+    return row;
+  }
+
+  function anadirCampoExtraEnFormulario() {
+    if (!dom.camposExtra) return;
+    const row = crearFilaCampoExtra("", "");
+    dom.camposExtra.appendChild(row);
+    const inputKey = row.querySelector(".extra-field-key");
+    if (inputKey) window.setTimeout(() => inputKey.focus(), 30);
+  }
+
+  /** Lee los campos extra del formulario; solo afectan a la ficha en edición */
+  function leerCamposExtraDelFormulario() {
+    const out = {};
+    const seen = new Set();
+    if (!dom.camposExtra) return { extras: out, error: null };
+
+    for (const row of dom.camposExtra.querySelectorAll(".extra-field-row")) {
+      const key = normalizarNombreCampo(row.querySelector(".extra-field-key")?.value);
+      const val = String(row.querySelector(".extra-field-val")?.value ?? "").trim();
+      if (!key) {
+        if (val) {
+          return {
+            extras: null,
+            error: "Hay un valor sin nombre de campo · ponle nombre o bórralo",
+          };
+        }
+        continue;
+      }
+
+      const clave = normalizarClave(key);
+      if (CLAVES_NUCLEO.has(clave)) {
+        return {
+          extras: null,
+          error: `“${key}” es un campo fijo · elige otro nombre`,
+        };
+      }
+      if (seen.has(clave)) {
+        return { extras: null, error: `Campo duplicado: “${key}”` };
+      }
+      seen.add(clave);
+      if (val) out[key] = val;
+    }
+
+    return { extras: out, error: null };
   }
 
   /** Genera el HTML interno de una ficha (usado en rueda y tabla) */
@@ -829,18 +1000,21 @@
   }
 
   /** Avanza la rueda un paso en la dirección indicada */
-  function avanzar(delta) {
+  function avanzar(delta, { sinBloqueo = false } = {}) {
     if (modoVista === "tabla") return;
-    if (!alumnos.length || bloqueoRueda || modalAbierto()) return;
-    bloqueoRueda = true;
+    if (!alumnos.length || modalAbierto()) return;
+    if (bloqueoRueda && !sinBloqueo) return;
+    if (!sinBloqueo) {
+      bloqueoRueda = true;
+      window.setTimeout(() => {
+        bloqueoRueda = false;
+      }, 120);
+    }
     indiceGiro += delta;
     const needsRebuild = alumnos.length > RANGO_VISIBLE * 2 + 1;
     if (needsRebuild) renderizarFichas();
     else actualizarRotacion(true);
     reproducirClic();
-    window.setTimeout(() => {
-      bloqueoRueda = false;
-    }, 120);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -997,9 +1171,14 @@
   // ── Selección de modo de importación ─────────────────────────────────────
 
   /** Completa la promesa del modo de importación elegido por el usuario */
+  /** Completa la elección de modo de importación */
   function completarModoImportacion(mode) {
     dom.overlayModo.hidden = true;
-    establecerModal(!dom.overlayImportacion.hidden || !dom.overlayFicha.hidden);
+    establecerModal(
+      !dom.overlayImportacion.hidden ||
+        !dom.overlayFicha.hidden ||
+        (dom.overlayDuplicado && !dom.overlayDuplicado.hidden)
+    );
     const resolve = resolverModoImportacion;
     resolverModoImportacion = null;
     if (resolve) resolve(mode);
@@ -1018,6 +1197,190 @@
     return new Promise((resolve) => {
       resolverModoImportacion = resolve;
     });
+  }
+
+  function indicePorNombre(nombre, lista = alumnos) {
+    const clave = normalizarClave(nombre);
+    if (!clave) return -1;
+    return lista.findIndex((a) => normalizarClave(a.nombre) === clave);
+  }
+
+  function resumenFichaCorta(alumno) {
+    const bits = [
+      alumno.instrumento || "—",
+      alumno.curso || "—",
+      alumno.telefono || "—",
+    ];
+    return bits.join(" · ");
+  }
+
+  function mostrarErrorDuplicado(msg) {
+    if (!dom.errorDuplicado) return;
+    if (!msg) {
+      dom.errorDuplicado.hidden = true;
+      dom.errorDuplicado.textContent = "";
+      return;
+    }
+    dom.errorDuplicado.hidden = false;
+    dom.errorDuplicado.textContent = msg;
+  }
+
+  /**
+   * Pregunta qué hacer cuando el nombre importado ya existe.
+   * @returns {Promise<{accion:"sobreescribir"|"omitir"|"crear", nombre?:string}>}
+   */
+  function pedirResolucionDuplicado(nuevo, existente, aviso = "") {
+    const nombre = nuevo.nombre || "Sin nombre";
+    const prog =
+      progresoDuplicado.total > 1
+        ? ` (${progresoDuplicado.actual} de ${progresoDuplicado.total})`
+        : "";
+    const titulo = document.getElementById("dupTitle");
+    if (titulo) titulo.textContent = `Nombre duplicado${prog}`;
+    dom.subtituloDuplicado.textContent = `Ya existe una ficha llamada “${nombre}”. ¿Qué quieres hacer?`;
+    dom.comparacionDuplicado.innerHTML = `
+      <div class="dup-compare__col">
+        <span class="dup-compare__label">Existente</span>
+        <strong>${escaparHtml(existente.nombre || "Sin nombre")}</strong>
+        ${escaparHtml(resumenFichaCorta(existente))}
+      </div>
+      <div class="dup-compare__col">
+        <span class="dup-compare__label">Importada</span>
+        <strong>${escaparHtml(nuevo.nombre || "Sin nombre")}</strong>
+        ${escaparHtml(resumenFichaCorta(nuevo))}
+      </div>
+    `;
+    dom.entradaNombreDuplicado.value = nuevo.nombre || "";
+    mostrarErrorDuplicado(aviso);
+    dom.overlayDuplicado.hidden = false;
+    establecerModal(true);
+    window.setTimeout(() => {
+      if (dom.entradaNombreDuplicado) {
+        dom.entradaNombreDuplicado.focus();
+        dom.entradaNombreDuplicado.select();
+      }
+    }, 40);
+
+    return new Promise((resolve) => {
+      resolverDuplicado = resolve;
+    });
+  }
+
+  function nombreDuplicadoOcupado(nombre) {
+    return (
+      indicePorNombre(nombre, alumnos) >= 0 ||
+      indicePorNombre(nombre, nombresLoteDuplicado) >= 0
+    );
+  }
+
+  function completarDuplicado(accion) {
+    if (!resolverDuplicado) {
+      if (dom.overlayDuplicado) dom.overlayDuplicado.hidden = true;
+      return;
+    }
+
+    if (accion === "crear") {
+      const nombre = (dom.entradaNombreDuplicado?.value || "").trim();
+      if (!nombre) {
+        mostrarErrorDuplicado("Escribe un nombre para la ficha nueva");
+        dom.entradaNombreDuplicado?.focus();
+        return;
+      }
+      if (nombreDuplicadoOcupado(nombre)) {
+        mostrarErrorDuplicado(
+          `“${nombre}” también existe. Cambia el nombre, sobrescribe u omite.`
+        );
+        dom.entradaNombreDuplicado?.focus();
+        dom.entradaNombreDuplicado?.select();
+        return;
+      }
+      const resolve = resolverDuplicado;
+      resolverDuplicado = null;
+      dom.overlayDuplicado.hidden = true;
+      mostrarErrorDuplicado("");
+      establecerModal(
+        !dom.overlayImportacion.hidden || !dom.overlayFicha.hidden || !dom.overlayModo.hidden
+      );
+      resolve({ accion: "crear", nombre });
+      return;
+    }
+
+    const resolve = resolverDuplicado;
+    resolverDuplicado = null;
+    dom.overlayDuplicado.hidden = true;
+    mostrarErrorDuplicado("");
+    establecerModal(
+      !dom.overlayImportacion.hidden || !dom.overlayFicha.hidden || !dom.overlayModo.hidden
+    );
+    resolve({ accion });
+  }
+
+  /**
+   * Al añadir: resuelve conflictos de nombre uno a uno.
+   * Puede sobrescribir fichas existentes in-place.
+   */
+  async function resolverDuplicadosAlAnadir(listaNueva) {
+    const anadidas = [];
+    nombresLoteDuplicado = anadidas;
+    let sobrescritas = 0;
+    let omitidas = 0;
+
+    const conflictos = listaNueva.filter((nuevo, i) => {
+      if (indicePorNombre(nuevo.nombre, alumnos) >= 0) return true;
+      const prev = listaNueva.slice(0, i);
+      return indicePorNombre(nuevo.nombre, prev) >= 0;
+    });
+    progresoDuplicado = { actual: 0, total: conflictos.length };
+    let conflictoIdx = 0;
+
+    for (const nuevo of listaNueva) {
+      let candidato = { ...nuevo };
+      let aviso = "";
+
+      while (true) {
+        const idxExistente = indicePorNombre(candidato.nombre, alumnos);
+        const idxEnLote = indicePorNombre(candidato.nombre, anadidas);
+
+        if (idxExistente < 0 && idxEnLote < 0) {
+          anadidas.push(candidato);
+          break;
+        }
+
+        conflictoIdx += 1;
+        progresoDuplicado.actual = Math.min(conflictoIdx, progresoDuplicado.total || conflictoIdx);
+
+        const existente =
+          idxExistente >= 0 ? alumnos[idxExistente] : anadidas[idxEnLote];
+        const decision = await pedirResolucionDuplicado(candidato, existente, aviso);
+        aviso = "";
+
+        if (decision.accion === "omitir") {
+          omitidas += 1;
+          break;
+        }
+
+        if (decision.accion === "sobreescribir") {
+          const reemplazo = { ...candidato, nombre: existente.nombre };
+          if (idxExistente >= 0) alumnos[idxExistente] = reemplazo;
+          else anadidas[idxEnLote] = reemplazo;
+          sobrescritas += 1;
+          break;
+        }
+
+        /* “crear” ya viene con nombre libre (validado en completarDuplicado) */
+        const nombreFinal = (decision.nombre || "").trim();
+        if (!nombreFinal) {
+          aviso = "Escribe un nombre para la ficha nueva";
+          continue;
+        }
+        anadidas.push({ ...candidato, nombre: nombreFinal });
+        break;
+      }
+    }
+
+    nombresLoteDuplicado = [];
+    progresoDuplicado = { actual: 0, total: 0 };
+    return { anadidas, sobrescritas, omitidas };
   }
 
   /** Aplica el mapeo de columnas confirmado y procede a cargar */
@@ -1072,7 +1435,7 @@
     if (mode === "cancelar") return;
 
     cerrarMapeadorImportacion();
-    cargarAlumnos(list, label, mode);
+    await cargarAlumnos(list, label, mode);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1080,7 +1443,7 @@
   // ══════════════════════════════════════════════════════════════════════════
 
   /** Carga una lista de alumnos en la app (reemplazando o añadiendo) */
-  function cargarAlumnos(list, label, mode = "reemplazar") {
+  async function cargarAlumnos(list, label, mode = "reemplazar") {
     if (!list.length) {
       establecerEstado("No se encontraron filas con nombre");
       return;
@@ -1088,10 +1451,17 @@
 
     if (mode === "anadir") {
       const before = alumnos.length;
-      alumnos = alumnos.concat(list);
-      indiceGiro = before;
+      const { anadidas, sobrescritas, omitidas } = await resolverDuplicadosAlAnadir(list);
+      alumnos = alumnos.concat(anadidas);
+      indiceGiro = Math.min(before, Math.max(0, alumnos.length - 1));
       actualizarVistas();
-      establecerEstado(`${list.length} añadidas · total ${alumnos.length} · ${label}`);
+
+      const partes = [];
+      if (anadidas.length) partes.push(`${anadidas.length} añadidas`);
+      if (sobrescritas) partes.push(`${sobrescritas} sobrescritas`);
+      if (omitidas) partes.push(`${omitidas} omitidas`);
+      if (!partes.length) partes.push("sin cambios");
+      establecerEstado(`${partes.join(" · ")} · total ${alumnos.length} · ${label}`);
     } else {
       alumnos = list;
       indiceGiro = 0;
@@ -1116,8 +1486,17 @@
     editandoFicha = false;
     renderizarFicha();
     dom.overlayFicha.hidden = false;
+    reiniciarAnimacionFicha();
     establecerModal(true);
     reproducirClic();
+  }
+
+  function reiniciarAnimacionFicha() {
+    const card = dom.overlayFicha?.querySelector(".sheet-card");
+    if (!card) return;
+    card.style.animation = "none";
+    void card.offsetWidth;
+    card.style.animation = "";
   }
 
   function cerrarFicha() {
@@ -1136,44 +1515,102 @@
     establecerModal(!dom.overlayImportacion.hidden);
   }
 
+  /** Cursos por defecto + los que ya existen en la base */
+  const CURSOS_POR_DEFECTO = ["1º Grado", "2º Grado", "3º Grado", "4º Grado"];
+
+  function listarCursosDisponibles(incluir = "") {
+    const set = new Set(CURSOS_POR_DEFECTO);
+    alumnos.forEach((a) => {
+      const c = String(a.curso || "").trim();
+      if (c) set.add(c);
+    });
+    const extra = String(incluir || "").trim();
+    if (extra) set.add(extra);
+    return [...set].sort((a, b) =>
+      a.localeCompare(b, "es", { numeric: true, sensitivity: "base" })
+    );
+  }
+
+  function rellenarSelectCurso(selected = "") {
+    const select = dom.formularioFicha?.querySelector('[name="curso"]');
+    if (!select) return;
+    const valor = String(selected || "").trim();
+    const cursos = listarCursosDisponibles(valor);
+    select.innerHTML = "";
+
+    const optEmpty = document.createElement("option");
+    optEmpty.value = "";
+    optEmpty.textContent = "Sin curso";
+    select.appendChild(optEmpty);
+
+    cursos.forEach((curso) => {
+      const opt = document.createElement("option");
+      opt.value = curso;
+      opt.textContent = curso;
+      select.appendChild(opt);
+    });
+
+    select.value = valor;
+    if (valor && select.value !== valor) {
+      const opt = document.createElement("option");
+      opt.value = valor;
+      opt.textContent = valor;
+      select.appendChild(opt);
+      select.value = valor;
+    }
+  }
+
   /** Renderiza el contenido del modal de ficha (vista o formulario) */
   function renderizarFicha() {
     const alumno = esBorradorNuevo ? {} : alumnos[indiceActivo()];
     if (!esBorradorNuevo && !alumno) return;
 
-    dom.numFicha.textContent = esBorradorNuevo
-      ? `Nueva ficha · pendiente de guardar`
-      : `Ficha N.º ${String(indiceActivo() + 1).padStart(3, "0")} · ${indiceActivo() + 1} / ${alumnos.length}`;
+    const card = dom.overlayFicha?.querySelector(".sheet-card");
+    const enEdicion = editandoFicha || esBorradorNuevo;
+    if (card) card.classList.toggle("sheet-card--editing", enEdicion);
 
-    if (editandoFicha || esBorradorNuevo) {
+    if (enEdicion) {
+      const num = esBorradorNuevo
+        ? "nuevo"
+        : String(indiceActivo() + 1).padStart(3, "0");
+      const cola = esBorradorNuevo
+        ? "pendiente de guardar"
+        : `${indiceActivo() + 1} / ${alumnos.length}`;
+      dom.numFicha.innerHTML =
+        `<span class="edit-badge">Modo edición</span>` +
+        `<span>Registro N.º ${num} · ${cola}</span>`;
+    } else {
+      dom.numFicha.textContent = `Ficha N.º ${String(indiceActivo() + 1).padStart(3, "0")} · ${indiceActivo() + 1} / ${alumnos.length}`;
+    }
+
+    if (enEdicion) {
       dom.vistaFicha.hidden = true;
       dom.formularioFicha.hidden = false;
       dom.btnEditar.hidden = true;
       dom.btnCancelarEdicion.hidden = false;
       dom.btnGuardar.hidden = false;
+      if (dom.btnImprimir) dom.btnImprimir.hidden = true;
       dom.btnEliminar.hidden = esBorradorNuevo;
 
       if (esBorradorNuevo) {
         dom.formularioFicha.reset();
         dom.camposExtra.innerHTML = "";
+        rellenarSelectCurso("");
       } else {
         for (const field of CAMPOS_CANONICOS) {
           const input = dom.formularioFicha.querySelector(`[name="${field.id}"]`);
           if (!input) continue;
+          if (field.id === "curso") {
+            rellenarSelectCurso(alumno.curso ?? "");
+            continue;
+          }
           const raw = alumno[field.id] ?? "";
           input.value = field.id === "telefono" ? soloDigitos(raw) : raw;
         }
 
         dom.camposExtra.innerHTML = "";
         entradasExtra(alumno).forEach(([key, val]) => {
-          const label = document.createElement("label");
-          const caption = document.createElement("span");
-          caption.textContent = key;
-          const input = document.createElement("input");
-          input.name = `extra:${key}`;
-          input.value = val ?? "";
-          label.append(caption, input);
-          dom.camposExtra.appendChild(label);
+          dom.camposExtra.appendChild(crearFilaCampoExtra(key, val));
         });
       }
     } else {
@@ -1182,49 +1619,63 @@
       dom.btnEditar.hidden = false;
       dom.btnCancelarEdicion.hidden = true;
       dom.btnGuardar.hidden = true;
+      if (dom.btnImprimir) dom.btnImprimir.hidden = false;
       dom.btnEliminar.hidden = false;
 
       dom.formularioFicha.reset();
       dom.camposExtra.innerHTML = "";
+
+      const emailRaw = (alumno.email || "").trim();
+      const emailHtml = emailRaw
+        ? `<a href="mailto:${escaparHtml(emailRaw)}">${escaparHtml(emailRaw)}</a>`
+        : "—";
 
       const extras = entradasExtra(alumno)
         .map(
           ([k, v]) => `
           <div>
             <dt>${escaparHtml(k)}</dt>
-            <dd>${escaparHtml(v)}</dd>
+            <dd class="sheet-value">${escaparHtml(v)}</dd>
           </div>`
         )
         .join("");
 
       dom.vistaFicha.innerHTML = `
-        <h3 id="sheetDialogTitle">${escaparHtml(alumno.nombre || "Sin nombre")}</h3>
-        <span class="badge">${escaparHtml(alumno.instrumento || "Sin instrumento")}</span>
-        <dl>
+        <div class="sheet-hero">
+          <h3 id="sheetDialogTitle">${escaparHtml(alumno.nombre || "Sin nombre")}</h3>
+          <span class="badge">${escaparHtml(alumno.instrumento || "Sin instrumento")}</span>
+        </div>
+        <hr class="sheet-rule" />
+        <dl class="sheet-grid">
           <div>
             <dt>Curso</dt>
-            <dd>${escaparHtml(alumno.curso || "—")}</dd>
+            <dd class="sheet-value">${escaparHtml(alumno.curso || "—")}</dd>
           </div>
           <div>
             <dt>Dirección</dt>
-            <dd>${escaparHtml(alumno.direccion || "—")}</dd>
+            <dd class="sheet-value">${escaparHtml(alumno.direccion || "—")}</dd>
           </div>
           <div>
             <dt>Teléfono</dt>
-            <dd>${escaparHtml(alumno.telefono || "—")}</dd>
+            <dd class="sheet-value">${escaparHtml(alumno.telefono || "—")}</dd>
           </div>
           <div>
             <dt>Email</dt>
-            <dd>${escaparHtml(alumno.email || "—")}</dd>
+            <dd class="sheet-value">${emailHtml}</dd>
           </div>
-          <div>
+          <div class="sheet-field--full">
             <dt>Notas</dt>
-            <dd>${escaparHtml(alumno.notas || "—")}</dd>
+            <dd class="sheet-value">${escaparHtml(alumno.notas || "—")}</dd>
           </div>
           ${extras}
         </dl>
       `;
     }
+  }
+
+  function imprimirFicha() {
+    if (dom.overlayFicha.hidden || editandoFicha || esBorradorNuevo) return;
+    window.print();
   }
 
   /** Guarda la ficha actual (nueva o editada) */
@@ -1244,15 +1695,17 @@
       return;
     }
 
-    if (!esBorradorNuevo) {
-      entradasExtra(alumnos[indiceActivo()]).forEach(([key]) => {
-        delete next[key];
-      });
+    const { extras, error } = leerCamposExtraDelFormulario();
+    if (error) {
+      establecerEstado(error);
+      return;
     }
-    [...dom.camposExtra.querySelectorAll("input")].forEach((input) => {
-      const key = input.name.replace(/^extra:/, "");
-      if (input.value.trim()) next[key] = input.value.trim();
+
+    /* Quitar extras antiguos solo de esta ficha; aplicar los del formulario */
+    Object.keys(next).forEach((k) => {
+      if (!CLAVES_NUCLEO.has(k)) delete next[k];
     });
+    Object.assign(next, extras);
 
     if (esBorradorNuevo) {
       alumnos.push(next);
@@ -1283,6 +1736,7 @@
     editandoFicha = true;
     establecerMenuImportacion(false);
     dom.overlayFicha.hidden = false;
+    reiniciarAnimacionFicha();
     establecerModal(true);
     renderizarFicha();
 
@@ -1331,7 +1785,39 @@
   // EVENTOS DEL DOM
   // ══════════════════════════════════════════════════════════════════════════
 
+  /** Arrastre vertical de la rueda */
+  const UMBRAL_INICIO_ARRASTRE = 8;
+  const UMBRAL_PASO_ARRASTRE = 34;
+  let arrastreRueda = null;
+  let suprimirClicTrasArrastre = false;
+
+  function finalizarArrastreRueda(e) {
+    if (!arrastreRueda || e.pointerId !== arrastreRueda.pointerId) return;
+
+    const fueArrastre = arrastreRueda.activo;
+    if (fueArrastre) {
+      /* Evita que el click posterior abra la ficha tras un arrastre real */
+      suprimirClicTrasArrastre = true;
+      window.setTimeout(() => {
+        suprimirClicTrasArrastre = false;
+      }, 80);
+      try {
+        dom.escenario.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    arrastreRueda = null;
+    dom.escenario.classList.remove("is-dragging");
+  }
+
   dom.rolodex.addEventListener("click", (e) => {
+    if (suprimirClicTrasArrastre) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const mailLink = e.target.closest("a.card-mail");
     if (mailLink) {
       e.stopPropagation();
@@ -1351,7 +1837,65 @@
     { passive: false }
   );
 
+  /* Arrastrar arriba/abajo para girar; un clic corto sigue abriendo la ficha */
+  dom.escenario.addEventListener("pointerdown", (e) => {
+    if (modoVista === "tabla" || modalAbierto()) return;
+    if (e.button !== 0) return;
+    if (e.target.closest(".stage-tools, .wheel-sort, a.card-mail")) return;
+
+    arrastreRueda = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      lastY: e.clientY,
+      acumulado: 0,
+      activo: false,
+    };
+  });
+
+  dom.escenario.addEventListener("pointermove", (e) => {
+    if (!arrastreRueda || e.pointerId !== arrastreRueda.pointerId) return;
+
+    const total = e.clientY - arrastreRueda.startY;
+    if (!arrastreRueda.activo) {
+      if (Math.abs(total) < UMBRAL_INICIO_ARRASTRE) return;
+      arrastreRueda.activo = true;
+      arrastreRueda.lastY = e.clientY;
+      arrastreRueda.acumulado = 0;
+      try {
+        dom.escenario.setPointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      dom.escenario.classList.add("is-dragging");
+    }
+
+    const dy = e.clientY - arrastreRueda.lastY;
+    arrastreRueda.lastY = e.clientY;
+    arrastreRueda.acumulado += dy;
+
+    while (Math.abs(arrastreRueda.acumulado) >= UMBRAL_PASO_ARRASTRE) {
+      const dir = arrastreRueda.acumulado > 0 ? 1 : -1;
+      arrastreRueda.acumulado -= dir * UMBRAL_PASO_ARRASTRE;
+      /* Arrastrar arriba → rueda hacia arriba; abajo → rueda hacia abajo */
+      avanzar(-dir, { sinBloqueo: true });
+    }
+  });
+
+  dom.escenario.addEventListener("pointerup", finalizarArrastreRueda);
+  dom.escenario.addEventListener("pointercancel", finalizarArrastreRueda);
+
   document.addEventListener("keydown", (e) => {
+    if (dom.overlayDuplicado && !dom.overlayDuplicado.hidden) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        completarDuplicado("omitir");
+      } else if (e.key === "Enter" && e.target === dom.entradaNombreDuplicado) {
+        e.preventDefault();
+        completarDuplicado("crear");
+      }
+      return;
+    }
+
     if (!dom.overlayModo.hidden) {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1474,7 +2018,7 @@
           return;
         }
 
-        cargarAlumnos(list, file.name, mode);
+        await cargarAlumnos(list, file.name, mode);
         return;
       }
 
@@ -1558,6 +2102,21 @@
     if (e.target === dom.overlayModo) completarModoImportacion("cancelar");
   });
 
+  if (dom.overlayDuplicado) {
+    /* Un solo handler por delegación (evita disparar dos veces el mismo clic) */
+    dom.overlayDuplicado.addEventListener("click", (e) => {
+      if (e.target === dom.overlayDuplicado) {
+        completarDuplicado("omitir");
+        return;
+      }
+      const btn = e.target.closest("[data-dup-action]");
+      if (!btn || !dom.overlayDuplicado.contains(btn)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      completarDuplicado(btn.getAttribute("data-dup-action"));
+    });
+  }
+
   dom.overlayImportacion.addEventListener("click", (e) => {
     if (e.target === dom.overlayImportacion) cerrarMapeadorImportacion();
   });
@@ -1579,6 +2138,15 @@
     e.preventDefault();
     guardarFicha();
   });
+  if (dom.btnImprimir) {
+    dom.btnImprimir.addEventListener("click", imprimirFicha);
+  }
+  if (dom.btnAnadirCampo) {
+    dom.btnAnadirCampo.addEventListener("click", () => {
+      anadirCampoExtraEnFormulario();
+      reproducirClic();
+    });
+  }
   dom.btnEliminar.addEventListener("click", eliminarFichaActual);
   dom.formularioFicha.addEventListener("submit", (e) => {
     e.preventDefault();
